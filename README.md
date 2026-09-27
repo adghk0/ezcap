@@ -15,15 +15,15 @@ dotnet run --project EzCap.csproj
 배포용 파일을 만들려면:
 
 ```powershell
-dotnet publish EzCap.csproj -c Release -r win-x64 --self-contained false -p:PublishDir=release\v0.1.1\
+dotnet publish EzCap.csproj -c Release -r win-x64 --self-contained false -p:PublishDir=release\v0.1.2\
 ```
 
-`release/v0.1.1`의 실행 파일과 `.dll`, `.deps.json`, `.runtimeconfig.json`을 같은 폴더에 두어야 합니다. 실행할 컴퓨터에는 .NET 9 Desktop Runtime이 필요합니다. 이 폴더의 `EzCap.exe`를 실행하세요.
+`release/v0.1.2`의 실행 파일과 `.dll`, `.deps.json`, `.runtimeconfig.json`을 같은 폴더에 두어야 합니다. 실행할 컴퓨터에는 .NET 9 Desktop Runtime이 필요합니다. 이 폴더의 `EzCap.exe`를 실행하세요.
 
 현재 사용자 계정에서 Windows 로그인 시 자동 실행하려면 PowerShell에서 다음을 실행합니다.
 
 ```powershell
-$exe = (Resolve-Path 'release\v0.1.1\EzCap.exe').Path
+$exe = (Resolve-Path 'release\v0.1.2\EzCap.exe').Path
 Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'EzCap' -Value ('"{0}"' -f $exe)
 ```
 

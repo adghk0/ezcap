@@ -11,8 +11,7 @@ internal sealed class EditorForm : Form
     private string _historyPath;
     private readonly Stack<Bitmap> _undo = new();
     private readonly Canvas _canvas;
-    private readonly ListView _historyList;
-    private ImageList _thumbnails = new() { ImageSize = new Size(108, 72), ColorDepth = ColorDepth.Depth32Bit };
+    private readonly Panel _historyStrip;
     private Color _color = Color.Red;
     private int _strokeWidth = 3;
     private TextBox? _textEditor;
@@ -57,21 +56,16 @@ internal sealed class EditorForm : Form
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(38, 38, 38) };
         _canvas = new Canvas(this) { Size = image.Size, Location = Point.Empty };
         scroll.Controls.Add(_canvas);
-        var historyPanel = new Panel { Dock = DockStyle.Bottom, Height = 128, Padding = new Padding(4) };
-        var historyLabel = new Label { Text = "캡처 이력", Dock = DockStyle.Top, Height = 20 };
-        _historyList = new ListView
+        _historyStrip = new Panel
         {
-            Dock = DockStyle.Fill,
-            View = View.LargeIcon,
-            MultiSelect = false,
-            HideSelection = false,
-            LargeImageList = _thumbnails
+            Name = "HistoryStrip",
+            Dock = DockStyle.Bottom,
+            Height = 90,
+            AutoScroll = true,
+            BackColor = Color.FromArgb(38, 38, 38)
         };
-        _historyList.SelectedIndexChanged += (_, _) => OpenSelectedHistory();
-        historyPanel.Controls.Add(_historyList);
-        historyPanel.Controls.Add(historyLabel);
         Controls.Add(scroll);
-        Controls.Add(historyPanel);
+        Controls.Add(_historyStrip);
         Controls.Add(toolbar);
         _history.Changed += RefreshHistory;
         RefreshHistory();
@@ -183,9 +177,14 @@ internal sealed class EditorForm : Form
 
     private void RefreshHistory()
     {
-        var images = new ImageList { ImageSize = new Size(108, 72), ColorDepth = ColorDepth.Depth32Bit };
-        _historyList.BeginUpdate();
-        _historyList.Items.Clear();
+        _historyStrip.SuspendLayout();
+        foreach (var picture in _historyStrip.Controls.OfType<PictureBox>().ToArray())
+        {
+            picture.Image?.Dispose();
+            picture.Dispose();
+        }
+        _historyStrip.Controls.Clear();
+        var index = 0;
         foreach (var path in _history.Files)
         {
             try
@@ -194,34 +193,36 @@ internal sealed class EditorForm : Form
                 var thumbnail = new Bitmap(108, 72);
                 using (var graphics = Graphics.FromImage(thumbnail))
                 {
-                    graphics.Clear(Color.White);
-                    var scale = Math.Min(108.0 / image.Width, 72.0 / image.Height);
-                    var size = new Size((int)(image.Width * scale), (int)(image.Height * scale));
+                    var scale = Math.Max(108.0 / image.Width, 72.0 / image.Height);
+                    var size = new Size((int)Math.Ceiling(image.Width * scale), (int)Math.Ceiling(image.Height * scale));
                     graphics.DrawImage(image, new Rectangle((108 - size.Width) / 2, (72 - size.Height) / 2, size.Width, size.Height));
                 }
-                images.Images.Add(thumbnail);
-                thumbnail.Dispose();
-                var item = new ListViewItem(Path.GetFileNameWithoutExtension(path))
+                var picture = new PictureBox
                 {
+                    Image = thumbnail,
                     Tag = path,
-                    ImageIndex = images.Images.Count - 1,
-                    Selected = path == _historyPath
+                    Location = new Point(index * 108, 0),
+                    Size = new Size(108, 72),
+                    Margin = Padding.Empty,
+                    SizeMode = PictureBoxSizeMode.Normal
                 };
-                _historyList.Items.Add(item);
+                picture.Click += (_, _) => OpenHistory(path);
+                picture.Paint += (_, e) =>
+                {
+                    if (path == _historyPath)
+                        ControlPaint.DrawBorder(e.Graphics, picture.ClientRectangle, Color.DeepSkyBlue, ButtonBorderStyle.Solid);
+                };
+                _historyStrip.Controls.Add(picture);
+                index++;
             }
             catch (IOException) { /* A file being replaced will appear on the next update. */ }
         }
-        var previous = _thumbnails;
-        _thumbnails = images;
-        _historyList.LargeImageList = images;
-        previous.Dispose();
-        _historyList.EndUpdate();
+        _historyStrip.AutoScrollMinSize = new Size(index * 108, 72);
+        _historyStrip.ResumeLayout();
     }
 
-    private void OpenSelectedHistory()
+    private void OpenHistory(string path)
     {
-        if (_historyList.SelectedItems.Count == 0) return;
-        var path = (string)_historyList.SelectedItems[0].Tag!;
         if (path == _historyPath) return;
         CommitText();
         try
@@ -234,6 +235,7 @@ internal sealed class EditorForm : Form
             _undo.Clear();
             _canvas.Size = image.Size;
             _canvas.Invalidate();
+            foreach (Control picture in _historyStrip.Controls) picture.Invalidate();
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "캡처 이력 열기 실패", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
@@ -252,7 +254,7 @@ internal sealed class EditorForm : Form
         if (disposing)
         {
             _history.Changed -= RefreshHistory;
-            _thumbnails.Dispose();
+            foreach (var picture in _historyStrip.Controls.OfType<PictureBox>().ToArray()) picture.Image?.Dispose();
             _image.Dispose();
             foreach (var image in _undo) image.Dispose();
         }

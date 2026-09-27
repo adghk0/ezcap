@@ -14,9 +14,9 @@ internal sealed class CaptureHistory
     public event Action? Changed;
     public IReadOnlyList<string> Files => _files;
 
-    public CaptureHistory()
+    public CaptureHistory(string? directoryPath = null)
     {
-        _directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "EzCap");
+        _directory = directoryPath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "EzCap");
         var directory = Directory.CreateDirectory(_directory);
         if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
             throw new IOException("EzCap 이력 폴더가 다른 위치로 연결되어 있습니다.");
