@@ -7,16 +7,22 @@ namespace EzCap;
 internal sealed class EditorForm : Form
 {
     private Bitmap _image;
+    private readonly CaptureHistory _history;
+    private string _historyPath;
     private readonly Stack<Bitmap> _undo = new();
     private readonly Canvas _canvas;
+    private readonly ListView _historyList;
+    private ImageList _thumbnails = new() { ImageSize = new Size(108, 72), ColorDepth = ColorDepth.Depth32Bit };
     private Color _color = Color.Red;
     private int _strokeWidth = 3;
     private TextBox? _textEditor;
     private Rectangle? _pendingRectangle;
 
-    public EditorForm(Bitmap image)
+    public EditorForm(Bitmap image, CaptureHistory history, string historyPath)
     {
         _image = image;
+        _history = history;
+        _historyPath = historyPath;
         Text = "EzCap - 캡처 편집";
         StartPosition = FormStartPosition.CenterScreen;
         Size = new Size(Math.Min(image.Width + 50, 1200), Math.Min(image.Height + 110, 850));
@@ -51,8 +57,24 @@ internal sealed class EditorForm : Form
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(38, 38, 38) };
         _canvas = new Canvas(this) { Size = image.Size, Location = Point.Empty };
         scroll.Controls.Add(_canvas);
+        var historyPanel = new Panel { Dock = DockStyle.Bottom, Height = 128, Padding = new Padding(4) };
+        var historyLabel = new Label { Text = "캡처 이력", Dock = DockStyle.Top, Height = 20 };
+        _historyList = new ListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.LargeIcon,
+            MultiSelect = false,
+            HideSelection = false,
+            LargeImageList = _thumbnails
+        };
+        _historyList.SelectedIndexChanged += (_, _) => OpenSelectedHistory();
+        historyPanel.Controls.Add(_historyList);
+        historyPanel.Controls.Add(historyLabel);
         Controls.Add(scroll);
+        Controls.Add(historyPanel);
         Controls.Add(toolbar);
+        _history.Changed += RefreshHistory;
+        RefreshHistory();
         KeyPreview = true;
         KeyDown += (_, e) =>
         {
@@ -79,6 +101,7 @@ internal sealed class EditorForm : Form
         _image.Dispose();
         _image = _undo.Pop();
         _canvas.Invalidate();
+        UpdateHistory();
     }
 
     private void StartAnnotation(Rectangle rectangle)
@@ -133,6 +156,7 @@ internal sealed class EditorForm : Form
         _canvas.Controls.Remove(editor);
         editor.Dispose();
         _canvas.Invalidate();
+        UpdateHistory();
     }
 
     private void CancelText()
@@ -151,6 +175,69 @@ internal sealed class EditorForm : Form
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "클립보드 복사 실패", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 
+    private void UpdateHistory()
+    {
+        try { _history.Update(_historyPath, _image); }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "캡처 이력 갱신 실패", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
+    private void RefreshHistory()
+    {
+        var images = new ImageList { ImageSize = new Size(108, 72), ColorDepth = ColorDepth.Depth32Bit };
+        _historyList.BeginUpdate();
+        _historyList.Items.Clear();
+        foreach (var path in _history.Files)
+        {
+            try
+            {
+                using var image = _history.Load(path);
+                var thumbnail = new Bitmap(108, 72);
+                using (var graphics = Graphics.FromImage(thumbnail))
+                {
+                    graphics.Clear(Color.White);
+                    var scale = Math.Min(108.0 / image.Width, 72.0 / image.Height);
+                    var size = new Size((int)(image.Width * scale), (int)(image.Height * scale));
+                    graphics.DrawImage(image, new Rectangle((108 - size.Width) / 2, (72 - size.Height) / 2, size.Width, size.Height));
+                }
+                images.Images.Add(thumbnail);
+                thumbnail.Dispose();
+                var item = new ListViewItem(Path.GetFileNameWithoutExtension(path))
+                {
+                    Tag = path,
+                    ImageIndex = images.Images.Count - 1,
+                    Selected = path == _historyPath
+                };
+                _historyList.Items.Add(item);
+            }
+            catch (IOException) { /* A file being replaced will appear on the next update. */ }
+        }
+        var previous = _thumbnails;
+        _thumbnails = images;
+        _historyList.LargeImageList = images;
+        previous.Dispose();
+        _historyList.EndUpdate();
+    }
+
+    private void OpenSelectedHistory()
+    {
+        if (_historyList.SelectedItems.Count == 0) return;
+        var path = (string)_historyList.SelectedItems[0].Tag!;
+        if (path == _historyPath) return;
+        CommitText();
+        try
+        {
+            var image = _history.Load(path);
+            _image.Dispose();
+            _image = image;
+            _historyPath = path;
+            foreach (var undo in _undo) undo.Dispose();
+            _undo.Clear();
+            _canvas.Size = image.Size;
+            _canvas.Invalidate();
+        }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "캡처 이력 열기 실패", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
     private void Save()
     {
         CommitText();
@@ -164,6 +251,8 @@ internal sealed class EditorForm : Form
     {
         if (disposing)
         {
+            _history.Changed -= RefreshHistory;
+            _thumbnails.Dispose();
             _image.Dispose();
             foreach (var image in _undo) image.Dispose();
         }

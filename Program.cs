@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Windows.Forms;
 
 namespace EzCap;
@@ -10,7 +11,14 @@ internal static class Program
     private static void Main()
     {
         ApplicationConfiguration.Initialize();
-        Application.Run(new CaptureApp());
+        var user = WindowsIdentity.GetCurrent().User?.Value ?? Environment.UserName;
+        using var instance = new Mutex(true, $"Local\\EzCap-{user}", out var firstInstance);
+        if (!firstInstance) return;
+        try { Application.Run(new CaptureApp()); }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"EzCap을 시작하지 못했습니다: {ex.Message}", "EzCap", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 }
 
@@ -22,11 +30,13 @@ internal sealed class CaptureApp : ApplicationContext
     private const uint ModShift = 0x0004;
     private readonly HotkeyWindow _window;
     private readonly NotifyIcon _tray;
+    private readonly CaptureHistory _history;
     private CaptureOverlay? _overlay;
     private readonly List<EditorForm> _editors = [];
 
     public CaptureApp()
     {
+        _history = new CaptureHistory();
         _window = new HotkeyWindow(StartCapture);
         var menu = new ContextMenuStrip();
         menu.Items.Add("직사각형 캡처 (Ctrl+Shift+C)", null, (_, _) => StartCapture());
@@ -68,7 +78,15 @@ internal sealed class CaptureApp : ApplicationContext
 
     private void OpenEditor(Bitmap image)
     {
-        var editor = new EditorForm(image);
+        string path;
+        try { path = _history.Add(image); }
+        catch (Exception ex)
+        {
+            image.Dispose();
+            MessageBox.Show($"캡처 이력을 저장하지 못했습니다: {ex.Message}", "EzCap", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+        var editor = new EditorForm(image, _history, path);
         _editors.Add(editor);
         editor.FormClosed += (_, _) => _editors.Remove(editor);
         editor.Show();
