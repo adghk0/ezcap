@@ -11,6 +11,7 @@ internal sealed class EditorForm : Form
     private string _historyPath;
     private readonly Stack<Bitmap> _undo = new();
     private readonly Canvas _canvas;
+    private readonly Panel _viewport;
     private readonly Panel _historyStrip;
     private Color _color = Color.Red;
     private Color? _backgroundColor;
@@ -71,9 +72,9 @@ internal sealed class EditorForm : Form
         toolbar.Items.AddRange([colorButton, backgroundButton,
             widthLabel, widthBox, new ToolStripSeparator(), undoButton, copyButton, saveButton]);
 
-        var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(38, 38, 38) };
+        _viewport = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(38, 38, 38) };
         _canvas = new Canvas(this) { Size = image.Size, Location = Point.Empty };
-        scroll.Controls.Add(_canvas);
+        _viewport.Controls.Add(_canvas);
         _historyStrip = new Panel
         {
             Name = "HistoryStrip",
@@ -82,9 +83,11 @@ internal sealed class EditorForm : Form
             AutoScroll = true,
             BackColor = Color.FromArgb(38, 38, 38)
         };
-        Controls.Add(scroll);
+        Controls.Add(_viewport);
         Controls.Add(_historyStrip);
         Controls.Add(toolbar);
+        _viewport.Resize += (_, _) => CenterCanvas();
+        Load += (_, _) => FitImage();
         _history.Changed += RefreshHistory;
         RefreshHistory();
         KeyPreview = true;
@@ -265,10 +268,43 @@ internal sealed class EditorForm : Form
             foreach (var undo in _undo) undo.Dispose();
             _undo.Clear();
             _canvas.Size = image.Size;
+            FitImage();
             _canvas.Invalidate();
             foreach (Control picture in _historyStrip.Controls) picture.Invalidate();
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "캡처 이력 열기 실패", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
+    private void FitImage()
+    {
+        _viewport.AutoScrollPosition = Point.Empty;
+        _canvas.Location = Point.Empty;
+        _viewport.AutoScrollMinSize = _image.Size;
+
+        var work = Screen.FromControl(this).WorkingArea;
+        var nonViewportHeight = ClientSize.Height - _viewport.Height;
+        var desiredOuter = SizeFromClientSize(new Size(
+            _image.Width + 32,
+            _image.Height + nonViewportHeight + 32));
+        var target = new Size(
+            Math.Min(work.Width, Math.Max(Width, desiredOuter.Width)),
+            Math.Min(work.Height, Math.Max(Height, desiredOuter.Height)));
+        if (target != Size)
+        {
+            Bounds = new Rectangle(
+                work.Left + (work.Width - target.Width) / 2,
+                work.Top + (work.Height - target.Height) / 2,
+                target.Width, target.Height);
+        }
+        CenterCanvas();
+    }
+
+    private void CenterCanvas()
+    {
+        if (_viewport.IsDisposed || _canvas.IsDisposed) return;
+        _canvas.Location = new Point(
+            Math.Max(0, (_viewport.ClientSize.Width - _canvas.Width) / 2),
+            Math.Max(0, (_viewport.ClientSize.Height - _canvas.Height) / 2));
     }
 
     private void Save()

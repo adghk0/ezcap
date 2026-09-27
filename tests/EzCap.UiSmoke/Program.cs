@@ -25,6 +25,22 @@ try
     if (tiles.Length != 2) throw new Exception($"Expected 2 history images, found {tiles.Length}.");
     if (tiles[0].Right != tiles[1].Left) throw new Exception("History images have a gap.");
     if (strip.Controls.OfType<Label>().Any()) throw new Exception("History labels are visible.");
+    using var large = new Bitmap(800, 600);
+    var largePath = history.Add(large);
+    Application.DoEvents();
+    var initialSize = editor.Size;
+    var openHistory = typeof(EditorForm).GetMethod("OpenHistory", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+    openHistory.Invoke(editor, [largePath]);
+    Application.DoEvents();
+    if (editor.Width <= initialSize.Width && editor.Height <= initialSize.Height)
+        throw new Exception("The editor did not grow for a larger history image.");
+    openHistory.Invoke(editor, [firstPath]);
+    Application.DoEvents();
+    var viewport = (Panel)typeof(EditorForm).GetField("_viewport", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(editor)!;
+    var canvas = viewport.Controls[0];
+    if (canvas.Left != (viewport.ClientSize.Width - canvas.Width) / 2 ||
+        canvas.Top != (viewport.ClientSize.Height - canvas.Height) / 2)
+        throw new Exception("The smaller history image was not centered.");
     var beforeClose = File.ReadAllBytes(firstPath);
     using var original = history.Load(firstPath);
     var untouchedPixel = original.GetPixel(90, 60).ToArgb();
@@ -59,7 +75,7 @@ try
     using (var filledResult = history.Load(firstPath))
         if (filledResult.GetPixel(70, 50).ToArgb() != Color.Yellow.ToArgb())
             throw new Exception("Selected annotation background was not rendered.");
-    Console.WriteLine("UI smoke passed: transparent default and selected background color rendered.");
+    Console.WriteLine("UI smoke passed: history window grows, small image centers, annotation colors render.");
 }
 finally
 {
