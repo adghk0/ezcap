@@ -2,6 +2,11 @@ using System.Drawing;
 using System.Windows.Forms;
 using EzCap;
 
+internal static class Program
+{
+[STAThread]
+private static void Main()
+{
 ApplicationConfiguration.Initialize();
 var testRoot = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "tests", ".history-smoke", Guid.NewGuid().ToString("N")));
 var workspace = Path.GetFullPath(Environment.CurrentDirectory);
@@ -46,6 +51,9 @@ try
     var untouchedPixel = original.GetPixel(90, 60).ToArgb();
     typeof(EditorForm).GetMethod("StartAnnotation", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
         .Invoke(editor, [new Rectangle(4, 4, 100, 65)]);
+    using var borderClipboard = Clipboard.GetImage() as Bitmap ?? throw new Exception("Pending rectangle was not copied.");
+    if (borderClipboard.GetPixel(4, 4).R < 200)
+        throw new Exception("Clipboard is missing the pending rectangle.");
     var textEditor = FindTextBox(editor) ?? throw new Exception("Annotation editor was not created.");
     if (textEditor.Parent?.GetType().Name != "Canvas" || textEditor.Width > 2 || textEditor.Height > 2)
         throw new Exception("Text input was shown outside the rectangle.");
@@ -55,6 +63,10 @@ try
         .Any(item => (item.Text ?? string.Empty).Contains("사각형을 그린 뒤")))
         throw new Exception("The removed toolbar instruction is still visible.");
     textEditor.Text = "note";
+    using var textClipboard = Clipboard.GetImage() as Bitmap ?? throw new Exception("Pending text was not copied.");
+    if (Enumerable.Range(12, 25).SelectMany(y => Enumerable.Range(12, 55).Select(x => (x, y)))
+        .All(point => textClipboard.GetPixel(point.x, point.y).ToArgb() == borderClipboard.GetPixel(point.x, point.y).ToArgb()))
+        throw new Exception("Clipboard did not update while typing.");
     editor.Close();
     Application.DoEvents();
     if (beforeClose.SequenceEqual(File.ReadAllBytes(firstPath)))
@@ -75,11 +87,12 @@ try
     using (var filledResult = history.Load(firstPath))
         if (filledResult.GetPixel(70, 50).ToArgb() != Color.Yellow.ToArgb())
             throw new Exception("Selected annotation background was not rendered.");
-    Console.WriteLine("UI smoke passed: history window grows, small image centers, annotation colors render.");
+    Console.WriteLine("UI smoke passed: history layout, annotation colors, and pending clipboard previews.");
 }
 finally
 {
     Directory.Delete(testRoot, true);
+}
 }
 
 static Panel? FindHistoryStrip(Control root)
@@ -102,4 +115,5 @@ static TextBox? FindTextBox(Control root)
         if (nested is not null) return nested;
     }
     return null;
+}
 }

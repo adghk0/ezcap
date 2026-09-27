@@ -39,6 +39,7 @@ internal sealed class EditorForm : Form
                 _color = dialog.Color;
                 colorButton.BackColor = _color;
                 _canvas?.Invalidate();
+                UpdateClipboard();
             }
         };
         var backgroundButton = new ToolStripDropDownButton("배경: 투명");
@@ -48,6 +49,7 @@ internal sealed class EditorForm : Form
             backgroundButton.Text = "배경: 투명";
             backgroundButton.BackColor = SystemColors.Control;
             _canvas?.Invalidate();
+            UpdateClipboard();
         });
         backgroundButton.DropDownItems.Add("색상 선택...", null, (_, _) =>
         {
@@ -57,12 +59,18 @@ internal sealed class EditorForm : Form
             backgroundButton.Text = "배경색";
             backgroundButton.BackColor = dialog.Color;
             _canvas?.Invalidate();
+            UpdateClipboard();
         });
         var widthLabel = new ToolStripLabel("선 굵기");
         var widthBox = new ToolStripComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 48 };
         widthBox.Items.AddRange(["1", "2", "3", "5", "8"]);
         widthBox.SelectedItem = "3";
-        widthBox.SelectedIndexChanged += (_, _) => _strokeWidth = int.Parse((string)widthBox.SelectedItem!);
+        widthBox.SelectedIndexChanged += (_, _) =>
+        {
+            _strokeWidth = int.Parse((string)widthBox.SelectedItem!);
+            _canvas?.Invalidate();
+            UpdateClipboard();
+        };
         var undoButton = new ToolStripButton("실행 취소");
         undoButton.Click += (_, _) => Undo();
         var copyButton = new ToolStripButton("클립보드 복사");
@@ -95,7 +103,7 @@ internal sealed class EditorForm : Form
         {
             if (e.Control && e.KeyCode == Keys.Z) { Undo(); e.SuppressKeyPress = true; }
             if (e.Control && e.KeyCode == Keys.S) { Save(); e.SuppressKeyPress = true; }
-            if (e.Control && e.KeyCode == Keys.C && _textEditor is null) { Copy(); e.SuppressKeyPress = true; }
+            if (e.Control && e.KeyCode == Keys.C) { Copy(); e.SuppressKeyPress = true; }
         };
     }
 
@@ -117,6 +125,7 @@ internal sealed class EditorForm : Form
         _image = _undo.Pop();
         _canvas.Invalidate();
         UpdateHistory();
+        UpdateClipboard();
     }
 
     private void StartAnnotation(Rectangle rectangle)
@@ -140,7 +149,11 @@ internal sealed class EditorForm : Form
             Location = inputPoint,
             Size = new Size(1, 1)
         };
-        _textEditor.TextChanged += (_, _) => _canvas.Invalidate(rectangle);
+        _textEditor.TextChanged += (_, _) =>
+        {
+            _canvas.Invalidate(rectangle);
+            UpdateClipboard();
+        };
         _textEditor.KeyDown += (_, e) =>
         {
             if (e.Control && e.KeyCode == Keys.Enter) { CommitText(); e.SuppressKeyPress = true; }
@@ -149,6 +162,7 @@ internal sealed class EditorForm : Form
         _canvas.Controls.Add(_textEditor);
         _textEditor.Focus();
         _canvas.Invalidate(rectangle);
+        UpdateClipboard();
     }
 
     private void CommitText()
@@ -165,6 +179,7 @@ internal sealed class EditorForm : Form
         editor.Dispose();
         _canvas.Invalidate();
         UpdateHistory();
+        UpdateClipboard();
     }
 
     private void CancelText()
@@ -175,6 +190,7 @@ internal sealed class EditorForm : Form
         _canvas.Controls.Remove(editor);
         editor.Dispose();
         _canvas.Invalidate();
+        UpdateClipboard();
     }
 
     private void RenderAnnotation(Graphics graphics, Rectangle rectangle, string value, Font font)
@@ -198,9 +214,26 @@ internal sealed class EditorForm : Form
 
     private void Copy()
     {
-        CommitText();
-        try { Clipboard.SetImage(_image); }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "클립보드 복사 실패", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        UpdateClipboard(showError: true);
+    }
+
+    private void UpdateClipboard(bool showError = false)
+    {
+        try
+        {
+            using var image = (Bitmap)_image.Clone();
+            if (_pendingRectangle is { } rectangle && _textEditor is { } editor)
+            {
+                using var graphics = Graphics.FromImage(image);
+                RenderAnnotation(graphics, rectangle, editor.Text, editor.Font);
+            }
+            Clipboard.SetDataObject(image, true, 3, 100);
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or InvalidOperationException)
+        {
+            if (showError)
+                MessageBox.Show(this, ex.Message, "클립보드 복사 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private void UpdateHistory()
@@ -271,6 +304,7 @@ internal sealed class EditorForm : Form
             FitImage();
             _canvas.Invalidate();
             foreach (Control picture in _historyStrip.Controls) picture.Invalidate();
+            UpdateClipboard();
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "캡처 이력 열기 실패", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
