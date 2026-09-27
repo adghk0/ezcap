@@ -11,7 +11,7 @@ Directory.CreateDirectory(testRoot);
 try
 {
     var history = new CaptureHistory(testRoot);
-    var first = new Bitmap(64, 48);
+    var first = new Bitmap(120, 80);
     var firstPath = history.Add(first);
     using var editor = new EditorForm(first, history, firstPath);
     editor.Show();
@@ -26,15 +26,36 @@ try
     if (tiles[0].Right != tiles[1].Left) throw new Exception("History images have a gap.");
     if (strip.Controls.OfType<Label>().Any()) throw new Exception("History labels are visible.");
     var beforeClose = File.ReadAllBytes(firstPath);
+    using var original = history.Load(firstPath);
+    var untouchedPixel = original.GetPixel(90, 60).ToArgb();
     typeof(EditorForm).GetMethod("StartAnnotation", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-        .Invoke(editor, [new Rectangle(4, 4, 40, 30)]);
+        .Invoke(editor, [new Rectangle(4, 4, 100, 65)]);
     var textEditor = FindTextBox(editor) ?? throw new Exception("Annotation editor was not created.");
+    if (textEditor.Parent?.Parent != editor) throw new Exception("Text input covers the capture canvas.");
+    if (textEditor.Parent.Controls.OfType<Label>().Any())
+        throw new Exception("Text input has an overlapping label.");
     textEditor.Text = "note";
     editor.Close();
     Application.DoEvents();
     if (beforeClose.SequenceEqual(File.ReadAllBytes(firstPath)))
         throw new Exception("Closing the editor did not save the pending annotation.");
-    Console.WriteLine("UI smoke passed: image-only history and pending text saved on close.");
+    using (var transparentResult = history.Load(firstPath))
+        if (transparentResult.GetPixel(90, 60).ToArgb() != untouchedPixel)
+            throw new Exception("Default annotation background was not transparent.");
+
+    using var filledEditor = new EditorForm(history.Load(firstPath), history, firstPath);
+    typeof(EditorForm).GetField("_backgroundColor", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+        .SetValue(filledEditor, Color.Yellow);
+    filledEditor.Show();
+    Application.DoEvents();
+    typeof(EditorForm).GetMethod("StartAnnotation", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+        .Invoke(filledEditor, [new Rectangle(10, 10, 80, 50)]);
+    filledEditor.Close();
+    Application.DoEvents();
+    using (var filledResult = history.Load(firstPath))
+        if (filledResult.GetPixel(70, 50).ToArgb() != Color.Yellow.ToArgb())
+            throw new Exception("Selected annotation background was not rendered.");
+    Console.WriteLine("UI smoke passed: transparent default and selected background color rendered.");
 }
 finally
 {

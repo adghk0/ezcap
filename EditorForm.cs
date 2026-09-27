@@ -12,7 +12,9 @@ internal sealed class EditorForm : Form
     private readonly Stack<Bitmap> _undo = new();
     private readonly Canvas _canvas;
     private readonly Panel _historyStrip;
+    private readonly Panel _textInputPanel;
     private Color _color = Color.Red;
+    private Color? _backgroundColor;
     private int _strokeWidth = 3;
     private TextBox? _textEditor;
     private Rectangle? _pendingRectangle;
@@ -29,7 +31,7 @@ internal sealed class EditorForm : Form
 
         var toolbar = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
         var modeLabel = new ToolStripLabel("사각형을 그린 뒤 안에 글자를 입력하세요 (빈 글자도 가능)");
-        var colorButton = new ToolStripButton("색상") { BackColor = _color };
+        var colorButton = new ToolStripButton("글자/테두리 색") { BackColor = _color };
         colorButton.Click += (_, _) =>
         {
             using var dialog = new ColorDialog { Color = _color, FullOpen = true };
@@ -37,8 +39,26 @@ internal sealed class EditorForm : Form
             {
                 _color = dialog.Color;
                 colorButton.BackColor = _color;
+                _canvas?.Invalidate();
             }
         };
+        var backgroundButton = new ToolStripDropDownButton("배경: 투명");
+        backgroundButton.DropDownItems.Add("투명", null, (_, _) =>
+        {
+            _backgroundColor = null;
+            backgroundButton.Text = "배경: 투명";
+            backgroundButton.BackColor = SystemColors.Control;
+            _canvas?.Invalidate();
+        });
+        backgroundButton.DropDownItems.Add("색상 선택...", null, (_, _) =>
+        {
+            using var dialog = new ColorDialog { Color = _backgroundColor ?? Color.White, FullOpen = true };
+            if (dialog.ShowDialog(this) != DialogResult.OK) return;
+            _backgroundColor = dialog.Color;
+            backgroundButton.Text = "배경색";
+            backgroundButton.BackColor = dialog.Color;
+            _canvas?.Invalidate();
+        });
         var widthLabel = new ToolStripLabel("선 굵기");
         var widthBox = new ToolStripComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 48 };
         widthBox.Items.AddRange(["1", "2", "3", "5", "8"]);
@@ -50,7 +70,7 @@ internal sealed class EditorForm : Form
         copyButton.Click += (_, _) => Copy();
         var saveButton = new ToolStripButton("PNG 저장");
         saveButton.Click += (_, _) => Save();
-        toolbar.Items.AddRange([modeLabel, new ToolStripSeparator(), colorButton,
+        toolbar.Items.AddRange([modeLabel, new ToolStripSeparator(), colorButton, backgroundButton,
             widthLabel, widthBox, new ToolStripSeparator(), undoButton, copyButton, saveButton]);
 
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(38, 38, 38) };
@@ -64,8 +84,10 @@ internal sealed class EditorForm : Form
             AutoScroll = true,
             BackColor = Color.FromArgb(38, 38, 38)
         };
+        _textInputPanel = new Panel { Dock = DockStyle.Top, Height = 52, Visible = false, Padding = new Padding(4) };
         Controls.Add(scroll);
         Controls.Add(_historyStrip);
+        Controls.Add(_textInputPanel);
         Controls.Add(toolbar);
         _history.Changed += RefreshHistory;
         RefreshHistory();
@@ -103,24 +125,23 @@ internal sealed class EditorForm : Form
         if (rectangle.Width < 2 || rectangle.Height < 2) return;
         CommitText();
         _pendingRectangle = rectangle;
-        var inset = _strokeWidth + 4;
         _textEditor = new TextBox
         {
             Multiline = true,
-            BorderStyle = BorderStyle.None,
+            BorderStyle = BorderStyle.FixedSingle,
             ForeColor = _color,
-            BackColor = Color.White,
+            PlaceholderText = "글자 입력 · Ctrl+Enter로 확정",
             Font = new Font("Malgun Gothic", 14),
-            Location = new Point(rectangle.Left + inset, rectangle.Top + inset),
-            Size = new Size(Math.Max(1, rectangle.Width - inset * 2), Math.Max(1, rectangle.Height - inset * 2))
+            Dock = DockStyle.Fill
         };
+        _textEditor.TextChanged += (_, _) => _canvas.Invalidate(rectangle);
         _textEditor.KeyDown += (_, e) =>
         {
             if (e.Control && e.KeyCode == Keys.Enter) { CommitText(); e.SuppressKeyPress = true; }
             if (e.KeyCode == Keys.Escape) { CancelText(); e.SuppressKeyPress = true; }
         };
-        _textEditor.LostFocus += (_, _) => CommitText();
-        _canvas.Controls.Add(_textEditor);
+        _textInputPanel.Controls.Add(_textEditor);
+        _textInputPanel.Visible = true;
         _textEditor.Focus();
         _canvas.Invalidate(rectangle);
     }
@@ -134,21 +155,10 @@ internal sealed class EditorForm : Form
         var font = editor.Font;
         AddUndo();
         using (var graphics = Graphics.FromImage(_image))
-        using (var pen = new Pen(_color, _strokeWidth))
-        using (var brush = new SolidBrush(_color))
-        {
-            graphics.DrawRectangle(pen, rectangle);
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                var inset = _strokeWidth + 4;
-                var textArea = Rectangle.Inflate(rectangle, -inset, -inset);
-                graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
-                using var format = new StringFormat { Trimming = StringTrimming.EllipsisCharacter };
-                graphics.DrawString(value, font, brush, textArea, format);
-            }
-        }
-        _canvas.Controls.Remove(editor);
+            RenderAnnotation(graphics, rectangle, value, font);
+        _textInputPanel.Controls.Remove(editor);
         editor.Dispose();
+        _textInputPanel.Visible = false;
         _canvas.Invalidate();
         UpdateHistory();
     }
@@ -158,8 +168,29 @@ internal sealed class EditorForm : Form
         if (_textEditor is not { } editor) return;
         _textEditor = null;
         _pendingRectangle = null;
-        _canvas.Controls.Remove(editor);
+        _textInputPanel.Controls.Remove(editor);
         editor.Dispose();
+        _textInputPanel.Visible = false;
+        _canvas.Invalidate();
+    }
+
+    private void RenderAnnotation(Graphics graphics, Rectangle rectangle, string value, Font font)
+    {
+        if (_backgroundColor is { } background)
+        {
+            using var fill = new SolidBrush(background);
+            graphics.FillRectangle(fill, rectangle);
+        }
+        using var pen = new Pen(_color, _strokeWidth);
+        graphics.DrawRectangle(pen, rectangle);
+        if (string.IsNullOrWhiteSpace(value)) return;
+        var inset = _strokeWidth + 4;
+        var textArea = new Rectangle(rectangle.Left + inset, rectangle.Top + inset,
+            Math.Max(1, rectangle.Width - inset * 2), Math.Max(1, rectangle.Height - inset * 2));
+        using var brush = new SolidBrush(_color);
+        using var format = new StringFormat { Trimming = StringTrimming.EllipsisCharacter };
+        graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+        graphics.DrawString(value, font, brush, textArea, format);
     }
 
     private void Copy()
@@ -283,11 +314,14 @@ internal sealed class EditorForm : Form
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.DrawImageUnscaled(owner._image, Point.Empty);
-            using var pen = new Pen(owner._color, owner._strokeWidth);
             if (owner._pendingRectangle is { } pending)
-                e.Graphics.DrawRectangle(pen, pending);
+                owner.RenderAnnotation(e.Graphics, pending, owner._textEditor?.Text ?? string.Empty,
+                    owner._textEditor?.Font ?? owner.Font);
             if (_start is { } start)
+            {
+                using var pen = new Pen(owner._color, owner._strokeWidth);
                 e.Graphics.DrawRectangle(pen, BoundsOf(start, _end));
+            }
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
