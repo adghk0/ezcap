@@ -31,9 +31,13 @@ try
     typeof(EditorForm).GetMethod("StartAnnotation", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
         .Invoke(editor, [new Rectangle(4, 4, 100, 65)]);
     var textEditor = FindTextBox(editor) ?? throw new Exception("Annotation editor was not created.");
-    if (textEditor.Parent?.Parent != editor) throw new Exception("Text input covers the capture canvas.");
-    if (textEditor.Parent.Controls.OfType<Label>().Any())
-        throw new Exception("Text input has an overlapping label.");
+    if (textEditor.Parent?.GetType().Name != "Canvas" || textEditor.Width > 2 || textEditor.Height > 2)
+        throw new Exception("Text input was shown outside the rectangle.");
+    if (editor.Controls.OfType<Panel>().Any(panel => panel.Dock == DockStyle.Top))
+        throw new Exception("A top text input panel is still visible.");
+    if (editor.Controls.OfType<ToolStrip>().SelectMany(bar => bar.Items.OfType<ToolStripItem>())
+        .Any(item => (item.Text ?? string.Empty).Contains("사각형을 그린 뒤")))
+        throw new Exception("The removed toolbar instruction is still visible.");
     textEditor.Text = "note";
     editor.Close();
     Application.DoEvents();

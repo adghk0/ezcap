@@ -12,7 +12,6 @@ internal sealed class EditorForm : Form
     private readonly Stack<Bitmap> _undo = new();
     private readonly Canvas _canvas;
     private readonly Panel _historyStrip;
-    private readonly Panel _textInputPanel;
     private Color _color = Color.Red;
     private Color? _backgroundColor;
     private int _strokeWidth = 3;
@@ -30,7 +29,6 @@ internal sealed class EditorForm : Form
         MinimumSize = new Size(480, 300);
 
         var toolbar = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
-        var modeLabel = new ToolStripLabel("사각형을 그린 뒤 안에 글자를 입력하세요 (빈 글자도 가능)");
         var colorButton = new ToolStripButton("글자/테두리 색") { BackColor = _color };
         colorButton.Click += (_, _) =>
         {
@@ -70,7 +68,7 @@ internal sealed class EditorForm : Form
         copyButton.Click += (_, _) => Copy();
         var saveButton = new ToolStripButton("PNG 저장");
         saveButton.Click += (_, _) => Save();
-        toolbar.Items.AddRange([modeLabel, new ToolStripSeparator(), colorButton, backgroundButton,
+        toolbar.Items.AddRange([colorButton, backgroundButton,
             widthLabel, widthBox, new ToolStripSeparator(), undoButton, copyButton, saveButton]);
 
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(38, 38, 38) };
@@ -84,10 +82,8 @@ internal sealed class EditorForm : Form
             AutoScroll = true,
             BackColor = Color.FromArgb(38, 38, 38)
         };
-        _textInputPanel = new Panel { Dock = DockStyle.Top, Height = 52, Visible = false, Padding = new Padding(4) };
         Controls.Add(scroll);
         Controls.Add(_historyStrip);
-        Controls.Add(_textInputPanel);
         Controls.Add(toolbar);
         _history.Changed += RefreshHistory;
         RefreshHistory();
@@ -125,14 +121,21 @@ internal sealed class EditorForm : Form
         if (rectangle.Width < 2 || rectangle.Height < 2) return;
         CommitText();
         _pendingRectangle = rectangle;
+        var inset = _strokeWidth + 4;
+        var inputPoint = new Point(
+            Math.Clamp(rectangle.Left + inset, 0, _image.Width - 1),
+            Math.Clamp(rectangle.Top + inset, 0, _image.Height - 1));
+        var inputBackground = _backgroundColor ?? _image.GetPixel(inputPoint.X, inputPoint.Y);
+        if (inputBackground.A < 255) inputBackground = Color.Black;
         _textEditor = new TextBox
         {
             Multiline = true,
-            BorderStyle = BorderStyle.FixedSingle,
+            BorderStyle = BorderStyle.None,
             ForeColor = _color,
-            PlaceholderText = "글자 입력 · Ctrl+Enter로 확정",
             Font = new Font("Malgun Gothic", 14),
-            Dock = DockStyle.Fill
+            BackColor = inputBackground,
+            Location = inputPoint,
+            Size = new Size(1, 1)
         };
         _textEditor.TextChanged += (_, _) => _canvas.Invalidate(rectangle);
         _textEditor.KeyDown += (_, e) =>
@@ -140,8 +143,7 @@ internal sealed class EditorForm : Form
             if (e.Control && e.KeyCode == Keys.Enter) { CommitText(); e.SuppressKeyPress = true; }
             if (e.KeyCode == Keys.Escape) { CancelText(); e.SuppressKeyPress = true; }
         };
-        _textInputPanel.Controls.Add(_textEditor);
-        _textInputPanel.Visible = true;
+        _canvas.Controls.Add(_textEditor);
         _textEditor.Focus();
         _canvas.Invalidate(rectangle);
     }
@@ -156,9 +158,8 @@ internal sealed class EditorForm : Form
         AddUndo();
         using (var graphics = Graphics.FromImage(_image))
             RenderAnnotation(graphics, rectangle, value, font);
-        _textInputPanel.Controls.Remove(editor);
+        _canvas.Controls.Remove(editor);
         editor.Dispose();
-        _textInputPanel.Visible = false;
         _canvas.Invalidate();
         UpdateHistory();
     }
@@ -168,9 +169,8 @@ internal sealed class EditorForm : Form
         if (_textEditor is not { } editor) return;
         _textEditor = null;
         _pendingRectangle = null;
-        _textInputPanel.Controls.Remove(editor);
+        _canvas.Controls.Remove(editor);
         editor.Dispose();
-        _textInputPanel.Visible = false;
         _canvas.Invalidate();
     }
 
