@@ -249,6 +249,12 @@ internal sealed class EditorForm : Form
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "저장 실패", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        CommitText();
+        base.OnFormClosing(e);
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)

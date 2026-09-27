@@ -58,6 +58,7 @@ internal sealed class CaptureApp : ApplicationContext
     private void StartCapture()
     {
         if (_overlay is not null) return;
+        CloseEditors();
         var bounds = SystemInformation.VirtualScreen;
         var screenshot = new Bitmap(bounds.Width, bounds.Height);
         try
@@ -74,6 +75,11 @@ internal sealed class CaptureApp : ApplicationContext
             screenshot.Dispose();
             _tray.ShowBalloonTip(5000, "EzCap", $"캡처를 시작하지 못했습니다: {ex.Message}", ToolTipIcon.Error);
         }
+    }
+
+    private void CloseEditors()
+    {
+        foreach (var editor in _editors.ToArray()) editor.Close();
     }
 
     private void OpenEditor(Bitmap image)
@@ -96,7 +102,7 @@ internal sealed class CaptureApp : ApplicationContext
     protected override void ExitThreadCore()
     {
         _overlay?.Close();
-        foreach (var editor in _editors.ToArray()) editor.Close();
+        CloseEditors();
         UnregisterHotKey(_window.Handle, HotkeyId);
         _window.Dispose();
         _tray.Visible = false;

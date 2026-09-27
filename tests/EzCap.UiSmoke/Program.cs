@@ -25,9 +25,16 @@ try
     if (tiles.Length != 2) throw new Exception($"Expected 2 history images, found {tiles.Length}.");
     if (tiles[0].Right != tiles[1].Left) throw new Exception("History images have a gap.");
     if (strip.Controls.OfType<Label>().Any()) throw new Exception("History labels are visible.");
+    var beforeClose = File.ReadAllBytes(firstPath);
+    typeof(EditorForm).GetMethod("StartAnnotation", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+        .Invoke(editor, [new Rectangle(4, 4, 40, 30)]);
+    var textEditor = FindTextBox(editor) ?? throw new Exception("Annotation editor was not created.");
+    textEditor.Text = "note";
     editor.Close();
     Application.DoEvents();
-    Console.WriteLine("UI smoke passed: editor opened and two adjacent image-only history tiles rendered.");
+    if (beforeClose.SequenceEqual(File.ReadAllBytes(firstPath)))
+        throw new Exception("Closing the editor did not save the pending annotation.");
+    Console.WriteLine("UI smoke passed: image-only history and pending text saved on close.");
 }
 finally
 {
@@ -40,6 +47,17 @@ static Panel? FindHistoryStrip(Control root)
     {
         if (child is Panel { Name: "HistoryStrip" } strip) return strip;
         var nested = FindHistoryStrip(child);
+        if (nested is not null) return nested;
+    }
+    return null;
+}
+
+static TextBox? FindTextBox(Control root)
+{
+    foreach (Control child in root.Controls)
+    {
+        if (child is TextBox editor) return editor;
+        var nested = FindTextBox(child);
         if (nested is not null) return nested;
     }
     return null;
