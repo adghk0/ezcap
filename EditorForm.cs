@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace EzCap;
@@ -17,6 +18,7 @@ internal sealed class EditorForm : Form
     private Color? _backgroundColor;
     private int _strokeWidth = 3;
     private bool _textOnly;
+    private readonly CheckBox _textOnlyCheckBox;
     private Bitmap? _clipboardImage;
     private TextBox? _textEditor;
     private Rectangle? _pendingRectangle;
@@ -74,16 +76,16 @@ internal sealed class EditorForm : Form
             UpdateClipboard();
         };
         var undoButton = new ToolStripButton("실행 취소");
-        var textOnlyCheckBox = new CheckBox
+        _textOnlyCheckBox = new CheckBox
         {
             Name = "TextOnlyCheckBox",
             Text = "글자만",
             AutoSize = true,
             BackColor = Color.Transparent
         };
-        textOnlyCheckBox.CheckedChanged += (_, _) =>
+        _textOnlyCheckBox.CheckedChanged += (_, _) =>
         {
-            _textOnly = textOnlyCheckBox.Checked;
+            _textOnly = _textOnlyCheckBox.Checked;
             if (_textEditor is { } editor)
             {
                 var background = !_textOnly && _backgroundColor is { } selected
@@ -94,7 +96,7 @@ internal sealed class EditorForm : Form
             UpdateClipboard();
             _textEditor?.Focus();
         };
-        var textOnlyHost = new ToolStripControlHost(textOnlyCheckBox);
+        var textOnlyHost = new ToolStripControlHost(_textOnlyCheckBox);
         undoButton.Click += (_, _) => Undo();
         var copyButton = new ToolStripButton("클립보드 복사");
         copyButton.Click += (_, _) => Copy();
@@ -127,6 +129,11 @@ internal sealed class EditorForm : Form
             if (e.Control && e.KeyCode == Keys.Z) { Undo(); e.SuppressKeyPress = true; }
             if (e.Control && e.KeyCode == Keys.S) { Save(); e.SuppressKeyPress = true; }
             if (e.Control && e.KeyCode == Keys.C) { Copy(); e.SuppressKeyPress = true; }
+            if (e.Control && e.KeyCode == Keys.T)
+            {
+                _textOnlyCheckBox.Checked = !_textOnlyCheckBox.Checked;
+                e.SuppressKeyPress = true;
+            }
         };
     }
 
@@ -175,7 +182,7 @@ internal sealed class EditorForm : Form
         };
         _textEditor.TextChanged += (_, _) =>
         {
-            _canvas.Invalidate(rectangle);
+            _canvas.Invalidate();
             UpdateClipboard();
         };
         _textEditor.KeyDown += (_, e) =>
@@ -187,6 +194,28 @@ internal sealed class EditorForm : Form
         _textEditor.Focus();
         _canvas.Invalidate(rectangle);
         UpdateClipboard();
+    }
+
+    private void AddArrow(Point start, Point end)
+    {
+        if (start == end) return;
+        CommitText();
+        AddUndo();
+        using (var graphics = Graphics.FromImage(_image)) RenderArrow(graphics, start, end);
+        _canvas.Invalidate();
+        UpdateHistory();
+        UpdateClipboard();
+    }
+
+    private void RenderArrow(Graphics graphics, Point start, Point end)
+    {
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var pen = new Pen(_color, _strokeWidth)
+        {
+            CustomEndCap = new AdjustableArrowCap(Math.Max(4, _strokeWidth * 2),
+                Math.Max(5, _strokeWidth * 3), true)
+        };
+        graphics.DrawLine(pen, start, end);
     }
 
     private void CommitText()
@@ -231,10 +260,12 @@ internal sealed class EditorForm : Form
         }
         if (string.IsNullOrWhiteSpace(value)) return;
         var inset = _strokeWidth + 4;
-        var textArea = new Rectangle(rectangle.Left + inset, rectangle.Top + inset,
-            Math.Max(1, rectangle.Width - inset * 2), Math.Max(1, rectangle.Height - inset * 2));
+        var textTop = rectangle.Top + inset;
+        var textArea = new Rectangle(rectangle.Left + inset, textTop,
+            Math.Max(1, rectangle.Width - inset * 2),
+            Math.Max(1, (_image?.Height ?? (int)graphics.VisibleClipBounds.Bottom) - textTop));
         using var brush = new SolidBrush(_color);
-        using var format = new StringFormat { Trimming = StringTrimming.EllipsisCharacter };
+        using var format = new StringFormat();
         graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
         graphics.DrawString(value, font, brush, textArea, format);
     }
@@ -418,6 +449,7 @@ internal sealed class EditorForm : Form
         private readonly EditorForm owner;
         private Point? _start;
         private Point _end;
+        private bool _arrowDrag;
 
         public Canvas(EditorForm owner)
         {
@@ -434,10 +466,14 @@ internal sealed class EditorForm : Form
                     owner._textEditor?.Font ?? owner.Font);
             if (_start is { } start)
             {
-                using var pen = new Pen(owner._color, owner._strokeWidth);
-                // The dashed selection guide is editor-only, never part of the output.
-                if (owner._textOnly) pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
-                e.Graphics.DrawRectangle(pen, BoundsOf(start, _end));
+                if (_arrowDrag) owner.RenderArrow(e.Graphics, start, _end);
+                else
+                {
+                    using var pen = new Pen(owner._color, owner._strokeWidth);
+                    // The dashed selection guide is editor-only, never part of the output.
+                    if (owner._textOnly) pen.DashStyle = DashStyle.Dash;
+                    e.Graphics.DrawRectangle(pen, BoundsOf(start, _end));
+                }
             }
         }
 
@@ -445,6 +481,7 @@ internal sealed class EditorForm : Form
         {
             if (e.Button != MouseButtons.Left) return;
             owner.CommitText();
+            _arrowDrag = (ModifierKeys & Keys.Control) != 0;
             _start = e.Location;
             _end = e.Location;
             Capture = true;
@@ -456,7 +493,7 @@ internal sealed class EditorForm : Form
             var old = BoundsOf(_start.Value, _end);
             _end = e.Location;
             var dirty = Rectangle.Union(old, BoundsOf(_start.Value, _end));
-            dirty.Inflate(owner._strokeWidth + 2, owner._strokeWidth + 2);
+            dirty.Inflate(owner._strokeWidth * 4 + 2, owner._strokeWidth * 4 + 2);
             Invalidate(dirty);
         }
 
@@ -466,7 +503,9 @@ internal sealed class EditorForm : Form
             Capture = false;
             var rectangle = BoundsOf(start, e.Location);
             _start = null;
-            owner.StartAnnotation(rectangle);
+            if (_arrowDrag) owner.AddArrow(start, e.Location);
+            else owner.StartAnnotation(rectangle);
+            _arrowDrag = false;
             Invalidate();
         }
 

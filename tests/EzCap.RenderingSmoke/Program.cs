@@ -37,11 +37,30 @@ Check(Enumerable.Range(18, 40).SelectMany(y => Enumerable.Range(18, 140).Select(
 using var empty = Render(true, "");
 Check(Enumerable.Range(0, empty.Height).SelectMany(y => Enumerable.Range(0, empty.Width).Select(x => (x, y)))
     .All(p => empty.GetPixel(p.x, p.y).ToArgb() == Color.White.ToArgb()), "Empty annotation changed pixels.");
+using var overflow = new Bitmap(240, 140);
+using (var graphics = Graphics.FromImage(overflow))
+{
+    graphics.Clear(Color.White);
+    typeof(EditorForm).GetMethod("RenderAnnotation", flags)!.Invoke(owner,
+        [graphics, new Rectangle(10, 10, 100, 25), "first line\nsecond line\nthird line", font]);
+}
+Check(Enumerable.Range(45, 45).SelectMany(y => Enumerable.Range(15, 85).Select(x => (x, y)))
+    .Any(p => overflow.GetPixel(p.x, p.y).ToArgb() != Color.White.ToArgb()),
+    "Text stopped at the rectangle height.");
+using var arrow = new Bitmap(240, 140);
+using (var graphics = Graphics.FromImage(arrow))
+{
+    graphics.Clear(Color.White);
+    typeof(EditorForm).GetMethod("RenderArrow", flags)!.Invoke(owner,
+        [graphics, new Point(20, 30), new Point(180, 100)]);
+}
+Check(arrow.GetPixel(100, 65).R > 200 && arrow.GetPixel(100, 65).G < 100,
+    "Arrow line is missing.");
 using var encoded = new MemoryStream();
 textOnly.Save(encoded, ImageFormat.Png);
 encoded.Position = 0;
 using var decoded = new Bitmap(encoded);
 Check(Enumerable.Range(0, decoded.Height).SelectMany(y => Enumerable.Range(0, decoded.Width).Select(x => (x, y)))
     .All(p => decoded.GetPixel(p.x, p.y).ToArgb() == textOnly.GetPixel(p.x, p.y).ToArgb()), "PNG round-trip differs.");
-Console.WriteLine("Rendering smoke passed: default border/fill, text-only border/fill suppression, text, empty annotation, PNG round-trip.");
+Console.WriteLine("Rendering smoke passed: annotations, text overflow, arrow, PNG round-trip.");
 GC.SuppressFinalize(owner);

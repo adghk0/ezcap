@@ -126,7 +126,8 @@ try
     typeof(EditorForm).GetMethod("CommitText", flags)!.Invoke(textOnlyEditor, null);
     using (var committed = history.Load(textPath)) AssertTextOnly(committed);
     checkbox.Checked = false;
-    using (var unchanged = GetClipboardImage() ?? throw new Exception("Missing committed clipboard."))
+    using (var unchanged = GetClipboardImage(image => image.GetPixel(10, 10).ToArgb() == Color.White.ToArgb())
+        ?? throw new Exception("Missing committed clipboard."))
         AssertTextOnly(unchanged);
     // Save uses this same committed bitmap; verify the PNG encoding and reload.
     var pngPath = Path.Combine(testRoot, "text-only.png");
@@ -145,8 +146,24 @@ try
     typeof(EditorForm).GetMethod("CancelText", flags)!.Invoke(textOnlyEditor, null);
     using (var cancelled = GetClipboardImage() ?? throw new Exception("Missing cancelled clipboard."))
         if (HasText(cancelled)) throw new Exception("Cancel did not restore the clipboard.");
+    var toggleKey = new KeyEventArgs(Keys.Control | Keys.T);
+    typeof(Form).GetMethod("OnKeyDown", flags)!.Invoke(textOnlyEditor, [toggleKey]);
+    if (checkbox.Checked || !toggleKey.SuppressKeyPress)
+        throw new Exception("Ctrl+T did not toggle text-only mode.");
+    typeof(EditorForm).GetMethod("AddArrow", flags)!.Invoke(textOnlyEditor,
+        [new Point(30, 90), new Point(190, 90)]);
+    using (var arrowResult = history.Load(textPath))
+        if (arrowResult.GetPixel(100, 90).ToArgb() == Color.White.ToArgb())
+            throw new Exception("Arrow was not saved to history.");
+    using (var arrowClipboard = GetClipboardImage() ?? throw new Exception("Missing arrow clipboard."))
+        if (arrowClipboard.GetPixel(100, 90).ToArgb() == Color.White.ToArgb())
+            throw new Exception("Arrow was not copied to clipboard.");
+    typeof(EditorForm).GetMethod("Undo", flags)!.Invoke(textOnlyEditor, null);
+    using (var undoneArrow = history.Load(textPath))
+        if (undoneArrow.GetPixel(100, 90).ToArgb() != Color.White.ToArgb())
+            throw new Exception("Undo did not remove the arrow.");
     textOnlyEditor.Close();
-    Console.WriteLine("UI smoke passed: history, default rendering, text-only toggle, preview, automatic/manual clipboard, commit, PNG, undo, empty text, cancel.");
+    Console.WriteLine("UI smoke passed: history, text-only shortcut, clipboard preview, arrow, commit, PNG, undo, cancel.");
     if (isolatedHistory) Console.WriteLine("Isolated history fixture: production constructor and ACL policy were not tested.");
 }
 finally
@@ -164,13 +181,17 @@ static CaptureHistory CreateIsolatedHistory(string directory)
     return history;
 }
 
-static Bitmap? GetClipboardImage()
+static Bitmap? GetClipboardImage(Func<Bitmap, bool>? matches = null)
 {
-    for (var attempt = 0; attempt < 10; attempt++)
+    for (var attempt = 0; attempt < 20; attempt++)
     {
         try
         {
-            if (Clipboard.GetImage() is Bitmap image) return image;
+            if (Clipboard.GetImage() is Bitmap image)
+            {
+                if (matches?.Invoke(image) != false) return image;
+                image.Dispose();
+            }
         }
         catch (System.Runtime.InteropServices.ExternalException) { }
         Application.DoEvents();

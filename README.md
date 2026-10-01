@@ -12,6 +12,8 @@ Windows에서 `Ctrl+Shift+C`를 누르고 마우스로 직사각형을 드래그
 
 **글자만** 체크박스를 켜면 테두리와 배경 채우기 없이 글자만 표시합니다. 기본값은 해제이며, 변경 즉시 작성 중인 주석의 미리보기와 클립보드가 갱신됩니다. 이후 작성할 주석에도 적용되지만 이미 확정된 주석은 바뀌지 않습니다. 드래그 중의 점선은 편집 가이드이며 복사·저장 결과에는 포함되지 않습니다.
 
+`Ctrl+T`로 **글자만** 모드를 켜거나 끌 수 있습니다. `Ctrl`을 누른 채 드래그하면 현재 색과 선 굵기로 화살표가 그려지며 이력과 클립보드에 즉시 반영됩니다. 사각형 안의 글자는 사각형 너비에 맞춰 줄바꿈하고, 높이를 넘어가도 이미지 아래쪽까지 이어집니다.
+
 ## 실행
 
 ```powershell
@@ -24,7 +26,7 @@ dotnet run --project EzCap.csproj
 dotnet publish EzCap.csproj -p:PublishProfile=Windows
 ```
 
-`release/v0.1.8/EzCap.exe`는 .NET 런타임을 포함하므로 실행할 컴퓨터에 .NET을 별도로 설치할 필요가 없습니다. 네이티브 런타임 파일은 실행 시 임시 폴더에 추출됩니다. WinForms trimming과 NativeAOT는 사용하지 않습니다.
+`release/v0.1.9/EzCap.exe`는 .NET 런타임을 포함하므로 실행할 컴퓨터에 .NET을 별도로 설치할 필요가 없습니다. 네이티브 런타임 파일은 실행 시 임시 폴더에 추출됩니다. WinForms trimming과 NativeAOT는 사용하지 않습니다.
 
 검증 명령:
 
@@ -40,7 +42,7 @@ UI 스모크 테스트는 Windows 데스크톱과 클립보드를 사용하며 �
 현재 사용자 계정에서 Windows 로그인 시 자동 실행하려면 PowerShell에서 다음을 실행합니다.
 
 ```powershell
-$exe = (Resolve-Path 'release\v0.1.8\EzCap.exe').Path
+$exe = (Resolve-Path 'release\v0.1.9\EzCap.exe').Path
 Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'EzCap' -Value ('"{0}"' -f $exe)
 ```
 
