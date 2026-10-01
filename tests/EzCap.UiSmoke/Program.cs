@@ -82,6 +82,10 @@ try
     if (clipboardTimer.Enabled) throw new Exception("Clipboard refresh ran during IME composition.");
     SendMessage(textEditor.Handle, 0x010E, IntPtr.Zero, IntPtr.Zero);
     if (!clipboardTimer.Enabled) throw new Exception("Clipboard refresh was not scheduled after IME composition.");
+    using var koreanClipboard = GetClipboardImage(image =>
+        Enumerable.Range(12, 25).SelectMany(y => Enumerable.Range(12, 55).Select(x => (x, y)))
+            .Any(point => image.GetPixel(point.x, point.y).ToArgb() != textClipboard.GetPixel(point.x, point.y).ToArgb()))
+        ?? throw new Exception("Composed Korean text did not reach the clipboard.");
     editor.Close();
     Application.DoEvents();
     if (beforeClose.SequenceEqual(File.ReadAllBytes(firstPath)))
