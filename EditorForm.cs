@@ -19,9 +19,9 @@ internal sealed class EditorForm : Form
     private int _strokeWidth = 3;
     private bool _textOnly;
     private readonly CheckBox _textOnlyCheckBox;
-    private readonly System.Windows.Forms.Timer _clipboardRefreshTimer = new() { Interval = 120 };
+    private readonly System.Windows.Forms.Timer _clipboardRefreshTimer = new() { Interval = 250 };
     private Bitmap? _clipboardImage;
-    private TextBox? _textEditor;
+    private AnnotationTextBox? _textEditor;
     private Rectangle? _pendingRectangle;
 
     public EditorForm(Bitmap image, CaptureHistory history, string historyPath)
@@ -172,7 +172,7 @@ internal sealed class EditorForm : Form
         var inputBackground = !_textOnly && _backgroundColor is { } selected
             ? selected : _image.GetPixel(inputPoint.X, inputPoint.Y);
         if (inputBackground.A < 255) inputBackground = Color.Black;
-        _textEditor = new TextBox
+        _textEditor = new AnnotationTextBox
         {
             Multiline = true,
             BorderStyle = BorderStyle.None,
@@ -188,7 +188,15 @@ internal sealed class EditorForm : Form
                 Math.Max(1, _image.Height - rectangle.Top));
             dirty.Inflate(_strokeWidth + 2, _strokeWidth + 2);
             _canvas.Invalidate(dirty);
-            if (!_clipboardRefreshTimer.Enabled) _clipboardRefreshTimer.Start();
+            _clipboardRefreshTimer.Stop();
+            if (_textEditor is { } activeEditor && !activeEditor.IsComposing())
+                _clipboardRefreshTimer.Start();
+        };
+        _textEditor.CompositionStarted += () => _clipboardRefreshTimer.Stop();
+        _textEditor.CompositionEnded += () =>
+        {
+            _clipboardRefreshTimer.Stop();
+            if (_textEditor is not null) _clipboardRefreshTimer.Start();
         };
         _textEditor.KeyDown += (_, e) =>
         {
@@ -449,6 +457,32 @@ internal sealed class EditorForm : Form
             foreach (var image in _undo) image.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    private sealed class AnnotationTextBox : TextBox
+    {
+        private const int WmImeStartComposition = 0x010D;
+        private const int WmImeEndComposition = 0x010E;
+
+        private bool _isComposing;
+        internal bool IsComposing() => _isComposing;
+        public event Action? CompositionStarted;
+        public event Action? CompositionEnded;
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == WmImeStartComposition)
+            {
+                _isComposing = true;
+                CompositionStarted?.Invoke();
+            }
+            base.WndProc(ref message);
+            if (message.Msg == WmImeEndComposition)
+            {
+                _isComposing = false;
+                CompositionEnded?.Invoke();
+            }
+        }
     }
 
     private sealed class Canvas : Control

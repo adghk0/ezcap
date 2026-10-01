@@ -4,6 +4,9 @@ using EzCap;
 
 internal static class Program
 {
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+private static extern IntPtr SendMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
+
 [STAThread]
 private static void Main(string[] args)
 {
@@ -66,13 +69,19 @@ try
         .Any(item => (item.Text ?? string.Empty).Contains("\uC0AC\uAC01\uD615\uC744 \uADF8\uB9B0 \uB4A4")))
         throw new Exception("The removed toolbar instruction is still visible.");
     textEditor.Text = "note";
-    if (!((System.Windows.Forms.Timer)typeof(EditorForm).GetField("_clipboardRefreshTimer",
-        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(editor)!).Enabled)
+    var clipboardTimer = (System.Windows.Forms.Timer)typeof(EditorForm).GetField("_clipboardRefreshTimer",
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(editor)!;
+    if (!clipboardTimer.Enabled)
         throw new Exception("Typing did not schedule a clipboard refresh.");
     using var textClipboard = GetClipboardImage(image =>
         Enumerable.Range(12, 25).SelectMany(y => Enumerable.Range(12, 55).Select(x => (x, y)))
             .Any(point => image.GetPixel(point.x, point.y).ToArgb() != borderClipboard.GetPixel(point.x, point.y).ToArgb()))
         ?? throw new Exception("Clipboard did not update while typing.");
+    SendMessage(textEditor.Handle, 0x010D, IntPtr.Zero, IntPtr.Zero);
+    textEditor.Text = "가";
+    if (clipboardTimer.Enabled) throw new Exception("Clipboard refresh ran during IME composition.");
+    SendMessage(textEditor.Handle, 0x010E, IntPtr.Zero, IntPtr.Zero);
+    if (!clipboardTimer.Enabled) throw new Exception("Clipboard refresh was not scheduled after IME composition.");
     editor.Close();
     Application.DoEvents();
     if (beforeClose.SequenceEqual(File.ReadAllBytes(firstPath)))
