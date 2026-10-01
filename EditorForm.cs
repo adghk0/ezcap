@@ -25,13 +25,13 @@ internal sealed class EditorForm : Form
         _image = image;
         _history = history;
         _historyPath = historyPath;
-        Text = "EzCap - ?? ??";
+        Text = "EzCap - 캡처 편집";
         StartPosition = FormStartPosition.CenterScreen;
         Size = new Size(Math.Min(image.Width + 50, 1200), Math.Min(image.Height + 110, 850));
         MinimumSize = new Size(480, 300);
 
         var toolbar = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Dock = DockStyle.Top };
-        var colorButton = new ToolStripButton("??/??? ?") { BackColor = _color };
+        var colorButton = new ToolStripButton("글자/테두리 색") { BackColor = _color };
         colorButton.Click += (_, _) =>
         {
             using var dialog = new ColorDialog { Color = _color, FullOpen = true };
@@ -43,26 +43,26 @@ internal sealed class EditorForm : Form
                 UpdateClipboard();
             }
         };
-        var backgroundButton = new ToolStripDropDownButton("??: ??");
-        backgroundButton.DropDownItems.Add("??", null, (_, _) =>
+        var backgroundButton = new ToolStripDropDownButton("배경: 투명");
+        backgroundButton.DropDownItems.Add("투명", null, (_, _) =>
         {
             _backgroundColor = null;
-            backgroundButton.Text = "??: ??";
+            backgroundButton.Text = "배경: 투명";
             backgroundButton.BackColor = SystemColors.Control;
             _canvas?.Invalidate();
             UpdateClipboard();
         });
-        backgroundButton.DropDownItems.Add("?? ??...", null, (_, _) =>
+        backgroundButton.DropDownItems.Add("색상 선택...", null, (_, _) =>
         {
             using var dialog = new ColorDialog { Color = _backgroundColor ?? Color.White, FullOpen = true };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             _backgroundColor = dialog.Color;
-            backgroundButton.Text = "???";
+            backgroundButton.Text = "배경색";
             backgroundButton.BackColor = dialog.Color;
             _canvas?.Invalidate();
             UpdateClipboard();
         });
-        var widthLabel = new ToolStripLabel("? ??");
+        var widthLabel = new ToolStripLabel("선 굵기");
         var widthBox = new ToolStripComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 48 };
         widthBox.Items.AddRange(["1", "2", "3", "5", "8"]);
         widthBox.SelectedItem = "3";
@@ -72,11 +72,11 @@ internal sealed class EditorForm : Form
             _canvas?.Invalidate();
             UpdateClipboard();
         };
-        var undoButton = new ToolStripButton("?? ??");
+        var undoButton = new ToolStripButton("실행 취소");
         var textOnlyCheckBox = new CheckBox
         {
             Name = "TextOnlyCheckBox",
-            Text = "???",
+            Text = "글자만",
             AutoSize = true,
             BackColor = Color.Transparent
         };
@@ -95,9 +95,9 @@ internal sealed class EditorForm : Form
         };
         var textOnlyHost = new ToolStripControlHost(textOnlyCheckBox);
         undoButton.Click += (_, _) => Undo();
-        var copyButton = new ToolStripButton("???? ??");
+        var copyButton = new ToolStripButton("클립보드 복사");
         copyButton.Click += (_, _) => Copy();
-        var saveButton = new ToolStripButton("PNG ??");
+        var saveButton = new ToolStripButton("PNG 저장");
         saveButton.Click += (_, _) => Save();
         toolbar.Items.AddRange([textOnlyHost, colorButton, backgroundButton,
             widthLabel, widthBox, new ToolStripSeparator(), undoButton, copyButton, saveButton]);
@@ -258,14 +258,14 @@ internal sealed class EditorForm : Form
         catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or InvalidOperationException)
         {
             if (showError)
-                MessageBox.Show(this, ex.Message, "???? ?? ??", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, ex.Message, "클립보드 복사 실패", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
     private void UpdateHistory()
     {
         try { _history.Update(_historyPath, _image); }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "?? ?? ?? ??", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "캡처 이력 갱신 실패", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 
     private void RefreshHistory()
@@ -332,7 +332,7 @@ internal sealed class EditorForm : Form
             foreach (Control picture in _historyStrip.Controls) picture.Invalidate();
             UpdateClipboard();
         }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "?? ?? ?? ??", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "캡처 이력 열기 실패", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 
     private void FitImage()
@@ -370,10 +370,10 @@ internal sealed class EditorForm : Form
     private void Save()
     {
         CommitText();
-        using var dialog = new SaveFileDialog { Filter = "PNG ???|*.png", DefaultExt = "png", FileName = $"EzCap_{DateTime.Now:yyyyMMdd_HHmmss}.png" };
+        using var dialog = new SaveFileDialog { Filter = "PNG 이미지|*.png", DefaultExt = "png", FileName = $"EzCap_{DateTime.Now:yyyyMMdd_HHmmss}.png" };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         try { _image.Save(dialog.FileName, ImageFormat.Png); }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "?? ??", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        catch (Exception ex) { MessageBox.Show(this, ex.Message, "저장 실패", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)

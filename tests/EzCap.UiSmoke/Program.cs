@@ -63,7 +63,7 @@ try
     if (editor.Controls.OfType<Panel>().Any(panel => panel.Dock == DockStyle.Top))
         throw new Exception("A top text input panel is still visible.");
     if (editor.Controls.OfType<ToolStrip>().SelectMany(bar => bar.Items.OfType<ToolStripItem>())
-        .Any(item => (item.Text ?? string.Empty).Contains("???? ?? ?")))
+        .Any(item => (item.Text ?? string.Empty).Contains("\uC0AC\uAC01\uD615\uC744 \uADF8\uB9B0 \uB4A4")))
         throw new Exception("The removed toolbar instruction is still visible.");
     textEditor.Text = "note";
     using var textClipboard = Clipboard.GetImage() as Bitmap ?? throw new Exception("Pending text was not copied.");
@@ -100,6 +100,7 @@ try
     var checkbox = textOnlyEditor.Controls.OfType<ToolStrip>()
         .SelectMany(bar => bar.Items.OfType<ToolStripControlHost>())
         .Select(host => host.Control).OfType<CheckBox>().Single(control => control.Name == "TextOnlyCheckBox");
+    if (checkbox.Text != "\uAE00\uC790\uB9CC") throw new Exception("Text-only label is not valid Korean.");
     if (checkbox.Checked) throw new Exception("Text-only must be off by default.");
     typeof(EditorForm).GetField("_backgroundColor", flags)!.SetValue(textOnlyEditor, Color.Yellow);
     var start = typeof(EditorForm).GetMethod("StartAnnotation", flags)!;
