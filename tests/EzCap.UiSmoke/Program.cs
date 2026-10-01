@@ -66,10 +66,13 @@ try
         .Any(item => (item.Text ?? string.Empty).Contains("\uC0AC\uAC01\uD615\uC744 \uADF8\uB9B0 \uB4A4")))
         throw new Exception("The removed toolbar instruction is still visible.");
     textEditor.Text = "note";
-    using var textClipboard = GetClipboardImage() ?? throw new Exception("Pending text was not copied.");
-    if (Enumerable.Range(12, 25).SelectMany(y => Enumerable.Range(12, 55).Select(x => (x, y)))
-        .All(point => textClipboard.GetPixel(point.x, point.y).ToArgb() == borderClipboard.GetPixel(point.x, point.y).ToArgb()))
-        throw new Exception("Clipboard did not update while typing.");
+    if (!((System.Windows.Forms.Timer)typeof(EditorForm).GetField("_clipboardRefreshTimer",
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(editor)!).Enabled)
+        throw new Exception("Typing did not schedule a clipboard refresh.");
+    using var textClipboard = GetClipboardImage(image =>
+        Enumerable.Range(12, 25).SelectMany(y => Enumerable.Range(12, 55).Select(x => (x, y)))
+            .Any(point => image.GetPixel(point.x, point.y).ToArgb() != borderClipboard.GetPixel(point.x, point.y).ToArgb()))
+        ?? throw new Exception("Clipboard did not update while typing.");
     editor.Close();
     Application.DoEvents();
     if (beforeClose.SequenceEqual(File.ReadAllBytes(firstPath)))
@@ -163,7 +166,20 @@ try
         if (undoneArrow.GetPixel(100, 90).ToArgb() != Color.White.ToArgb())
             throw new Exception("Undo did not remove the arrow.");
     textOnlyEditor.Close();
-    Console.WriteLine("UI smoke passed: history, text-only shortcut, clipboard preview, arrow, commit, PNG, undo, cancel.");
+    using var largeImage = new Bitmap(2560, 1440);
+    var largeTextPath = history.Add(largeImage);
+    using var largeEditor = new EditorForm((Bitmap)largeImage.Clone(), history, largeTextPath);
+    largeEditor.Show();
+    Application.DoEvents();
+    start.Invoke(largeEditor, [new Rectangle(20, 20, 400, 100)]);
+    var largeTextBox = FindTextBox(largeEditor) ?? throw new Exception("Large image text editor is missing.");
+    var typingTime = System.Diagnostics.Stopwatch.StartNew();
+    for (var i = 0; i < 50; i++) largeTextBox.Text = $"Typing {i}";
+    typingTime.Stop();
+    if (typingTime.ElapsedMilliseconds > 2000)
+        throw new Exception($"Typing on a large capture took {typingTime.ElapsedMilliseconds} ms.");
+    largeEditor.Close();
+    Console.WriteLine($"UI smoke passed: history, shortcuts, clipboard, arrow, undo, and 50 large-image text changes in {typingTime.ElapsedMilliseconds} ms.");
     if (isolatedHistory) Console.WriteLine("Isolated history fixture: production constructor and ACL policy were not tested.");
 }
 finally

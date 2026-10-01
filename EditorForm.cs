@@ -19,6 +19,7 @@ internal sealed class EditorForm : Form
     private int _strokeWidth = 3;
     private bool _textOnly;
     private readonly CheckBox _textOnlyCheckBox;
+    private readonly System.Windows.Forms.Timer _clipboardRefreshTimer = new() { Interval = 120 };
     private Bitmap? _clipboardImage;
     private TextBox? _textEditor;
     private Rectangle? _pendingRectangle;
@@ -122,6 +123,7 @@ internal sealed class EditorForm : Form
         _viewport.Resize += (_, _) => CenterCanvas();
         Load += (_, _) => FitImage();
         _history.Changed += RefreshHistory;
+        _clipboardRefreshTimer.Tick += (_, _) => UpdateClipboard();
         RefreshHistory();
         KeyPreview = true;
         KeyDown += (_, e) =>
@@ -182,8 +184,11 @@ internal sealed class EditorForm : Form
         };
         _textEditor.TextChanged += (_, _) =>
         {
-            _canvas.Invalidate();
-            UpdateClipboard();
+            var dirty = new Rectangle(rectangle.Left, rectangle.Top, rectangle.Width,
+                Math.Max(1, _image.Height - rectangle.Top));
+            dirty.Inflate(_strokeWidth + 2, _strokeWidth + 2);
+            _canvas.Invalidate(dirty);
+            if (!_clipboardRefreshTimer.Enabled) _clipboardRefreshTimer.Start();
         };
         _textEditor.KeyDown += (_, e) =>
         {
@@ -277,6 +282,7 @@ internal sealed class EditorForm : Form
 
     private void UpdateClipboard(bool showError = false)
     {
+        _clipboardRefreshTimer.Stop();
         try
         {
             var image = (Bitmap)_image.Clone();
@@ -435,6 +441,7 @@ internal sealed class EditorForm : Form
     {
         if (disposing)
         {
+            _clipboardRefreshTimer.Dispose();
             _history.Changed -= RefreshHistory;
             foreach (var picture in _historyStrip.Controls.OfType<PictureBox>().ToArray()) picture.Image?.Dispose();
             _image.Dispose();
