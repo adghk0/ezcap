@@ -54,7 +54,7 @@ try
     var untouchedPixel = original.GetPixel(90, 60).ToArgb();
     typeof(EditorForm).GetMethod("StartAnnotation", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
         .Invoke(editor, [new Rectangle(4, 4, 100, 65)]);
-    using var borderClipboard = Clipboard.GetImage() as Bitmap ?? throw new Exception("Pending rectangle was not copied.");
+    using var borderClipboard = GetClipboardImage() ?? throw new Exception("Pending rectangle was not copied.");
     if (borderClipboard.GetPixel(4, 4).R < 200)
         throw new Exception("Clipboard is missing the pending rectangle.");
     var textEditor = FindTextBox(editor) ?? throw new Exception("Annotation editor was not created.");
@@ -66,7 +66,7 @@ try
         .Any(item => (item.Text ?? string.Empty).Contains("\uC0AC\uAC01\uD615\uC744 \uADF8\uB9B0 \uB4A4")))
         throw new Exception("The removed toolbar instruction is still visible.");
     textEditor.Text = "note";
-    using var textClipboard = Clipboard.GetImage() as Bitmap ?? throw new Exception("Pending text was not copied.");
+    using var textClipboard = GetClipboardImage() ?? throw new Exception("Pending text was not copied.");
     if (Enumerable.Range(12, 25).SelectMany(y => Enumerable.Range(12, 55).Select(x => (x, y)))
         .All(point => textClipboard.GetPixel(point.x, point.y).ToArgb() == borderClipboard.GetPixel(point.x, point.y).ToArgb()))
         throw new Exception("Clipboard did not update while typing.");
@@ -108,7 +108,7 @@ try
     FindTextBox(textOnlyEditor)!.Text = "Text only";
     checkbox.Checked = true;
     Application.DoEvents();
-    using var textOnlyClipboard = Clipboard.GetImage() as Bitmap ?? throw new Exception("Missing text-only clipboard.");
+    using var textOnlyClipboard = GetClipboardImage() ?? throw new Exception("Missing text-only clipboard.");
     AssertTextOnly(textOnlyClipboard);
     var textCanvas = ((Panel)typeof(EditorForm).GetField("_viewport", flags)!.GetValue(textOnlyEditor)!).Controls[0];
     using (var preview = new Bitmap(clean.Width, clean.Height))
@@ -117,7 +117,7 @@ try
         AssertTextOnly(preview);
     }
     checkbox.Checked = false;
-    using (var restored = Clipboard.GetImage() as Bitmap ?? throw new Exception("Missing restored clipboard."))
+    using (var restored = GetClipboardImage() ?? throw new Exception("Missing restored clipboard."))
         if (restored.GetPixel(10, 10).ToArgb() != Color.Red.ToArgb() || restored.GetPixel(180, 90).ToArgb() != Color.Yellow.ToArgb())
             throw new Exception("Disabling text-only did not restore border and fill.");
     checkbox.Checked = true;
@@ -126,7 +126,7 @@ try
     typeof(EditorForm).GetMethod("CommitText", flags)!.Invoke(textOnlyEditor, null);
     using (var committed = history.Load(textPath)) AssertTextOnly(committed);
     checkbox.Checked = false;
-    using (var unchanged = Clipboard.GetImage() as Bitmap ?? throw new Exception("Missing committed clipboard."))
+    using (var unchanged = GetClipboardImage() ?? throw new Exception("Missing committed clipboard."))
         AssertTextOnly(unchanged);
     // Save uses this same committed bitmap; verify the PNG encoding and reload.
     var pngPath = Path.Combine(testRoot, "text-only.png");
@@ -138,12 +138,12 @@ try
         if (HasText(undone)) throw new Exception("Undo did not remove committed text.");
     checkbox.Checked = true;
     start.Invoke(textOnlyEditor, [new Rectangle(10, 10, 200, 100)]);
-    using (var empty = Clipboard.GetImage() as Bitmap ?? throw new Exception("Missing empty clipboard."))
+    using (var empty = GetClipboardImage() ?? throw new Exception("Missing empty clipboard."))
         if (HasText(empty) || empty.GetPixel(10, 10).ToArgb() != Color.White.ToArgb())
             throw new Exception("Empty text-only annotation changed the image.");
     FindTextBox(textOnlyEditor)!.Text = "cancel";
     typeof(EditorForm).GetMethod("CancelText", flags)!.Invoke(textOnlyEditor, null);
-    using (var cancelled = Clipboard.GetImage() as Bitmap ?? throw new Exception("Missing cancelled clipboard."))
+    using (var cancelled = GetClipboardImage() ?? throw new Exception("Missing cancelled clipboard."))
         if (HasText(cancelled)) throw new Exception("Cancel did not restore the clipboard.");
     textOnlyEditor.Close();
     Console.WriteLine("UI smoke passed: history, default rendering, text-only toggle, preview, automatic/manual clipboard, commit, PNG, undo, empty text, cancel.");
@@ -162,6 +162,21 @@ static CaptureHistory CreateIsolatedHistory(string directory)
     typeof(CaptureHistory).GetField("_directory", flags)!.SetValue(history, directory);
     typeof(CaptureHistory).GetField("_files", flags)!.SetValue(history, new List<string>());
     return history;
+}
+
+static Bitmap? GetClipboardImage()
+{
+    for (var attempt = 0; attempt < 10; attempt++)
+    {
+        try
+        {
+            if (Clipboard.GetImage() is Bitmap image) return image;
+        }
+        catch (System.Runtime.InteropServices.ExternalException) { }
+        Application.DoEvents();
+        System.Threading.Thread.Sleep(50);
+    }
+    return null;
 }
 
 static bool HasText(Bitmap image) =>

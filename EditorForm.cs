@@ -17,6 +17,7 @@ internal sealed class EditorForm : Form
     private Color? _backgroundColor;
     private int _strokeWidth = 3;
     private bool _textOnly;
+    private Bitmap? _clipboardImage;
     private TextBox? _textEditor;
     private Rectangle? _pendingRectangle;
 
@@ -247,13 +248,30 @@ internal sealed class EditorForm : Form
     {
         try
         {
-            using var image = (Bitmap)_image.Clone();
+            var image = (Bitmap)_image.Clone();
             if (_pendingRectangle is { } rectangle && _textEditor is { } editor)
             {
                 using var graphics = Graphics.FromImage(image);
                 RenderAnnotation(graphics, rectangle, editor.Text, editor.Font);
             }
-            Clipboard.SetDataObject(image, true, 3, 100);
+            try
+            {
+                for (var attempt = 0; ; attempt++)
+                {
+                    try { Clipboard.SetImage(image); break; }
+                    catch (System.Runtime.InteropServices.ExternalException) when (attempt < 4)
+                    {
+                        System.Threading.Thread.Sleep(50);
+                    }
+                }
+                _clipboardImage?.Dispose();
+                _clipboardImage = image;
+            }
+            catch
+            {
+                image.Dispose();
+                throw;
+            }
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or InvalidOperationException)
         {
@@ -389,6 +407,7 @@ internal sealed class EditorForm : Form
             _history.Changed -= RefreshHistory;
             foreach (var picture in _historyStrip.Controls.OfType<PictureBox>().ToArray()) picture.Image?.Dispose();
             _image.Dispose();
+            _clipboardImage?.Dispose();
             foreach (var image in _undo) image.Dispose();
         }
         base.Dispose(disposing);
