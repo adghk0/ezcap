@@ -3,3 +3,7 @@ obj/
 .dotnet/
 .appdata/
 *.pdb
+release/v0.1.8/EzCap.exe
+release/v0.1.9/EzCap.exe
+release/v0.1.10/EzCap.exe
+release/v0.1.11/EzCap.exe

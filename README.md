@@ -4,11 +4,15 @@ Windows에서 `Ctrl+Shift+C`를 누르고 마우스로 직사각형을 드래그
 
 편집 창이 열린 상태에서 새 캡처를 시작하면 기존 창을 닫고 새 캡처를 진행합니다. 입력 중이던 글자는 닫기 전에 이력에 반영됩니다.
 
-편집 창에서 사각형을 드래그한 뒤 바로 글자를 입력하면 사각형 안에 투명 배경으로 미리 보입니다. 글자를 비워 두면 테두리만 그려집니다. 사각형을 놓거나 글자를 입력할 때마다 확정 전의 미리보기까지 클립보드에 즉시 반영됩니다. `Ctrl+Enter` 또는 캔버스를 클릭하면 테두리와 글자가 함께 확정됩니다. 배경은 기본적으로 투명하며 **배경: 투명** 메뉴에서 색을 선택하거나 다시 투명으로 돌릴 수 있습니다. 글자·테두리 색과 선 굵기도 바꿀 수 있고, `Ctrl+Z`로 마지막 편집을 취소할 수 있습니다. **클립보드 복사** 또는 `Ctrl+C`도 편집을 확정하지 않고 현재 보이는 이미지를 복사합니다. **PNG 저장**으로 파일을 저장할 수 있습니다.
+편집 창에서 사각형을 드래그한 뒤 바로 글자를 입력하면 사각형 안에 투명 배경으로 미리 보입니다. 글자를 비워 두면 테두리만 그려집니다. 사각형을 놓으면 미리보기가 클립보드에 즉시 반영됩니다. 입력 중인 글자는 한글 조합을 방해하지 않도록 조합이 끝나고 입력이 약 250ms 쉬면 클립보드에 반영됩니다. 입력 확정은 필요하지 않습니다. `Ctrl+Enter` 또는 캔버스를 클릭하면 테두리와 글자가 함께 확정됩니다. 배경은 기본적으로 투명하며 **배경: 투명** 메뉴에서 색을 선택하거나 다시 투명으로 돌릴 수 있습니다. 글자·테두리 색과 선 굵기도 바꿀 수 있고, `Ctrl+Z`로 마지막 편집을 취소할 수 있습니다. **클립보드 복사** 또는 `Ctrl+C`도 편집을 확정하지 않고 현재 보이는 이미지를 복사합니다. **PNG 저장**으로 파일을 저장할 수 있습니다.
 
 캡처 이력은 편집 창 아래쪽에 표시됩니다. 항목을 선택하면 이전 캡처를 다시 열 수 있습니다. 원본 및 편집 결과는 `%ProgramData%\EzCap`에 PNG로 저장되며, 프로그램을 다시 시작할 때 이전 세션 파일을 지웁니다. 이력 개수 제한은 없습니다. 이 폴더는 현재 사용자와 Windows SYSTEM 계정만 접근하도록 설정됩니다.
 
 이력에서 큰 이미지를 열면 화면에 맞는 범위까지 편집 창이 커집니다. 작은 이미지는 보기 영역의 가운데에 표시되고 나머지 영역은 비워 둡니다. 화면보다 큰 이미지는 스크롤해 볼 수 있습니다.
+
+**글자만** 체크박스를 켜면 테두리와 배경 채우기 없이 글자만 표시합니다. 기본값은 해제이며, 변경 즉시 작성 중인 주석의 미리보기와 클립보드가 갱신됩니다. 이후 작성할 주석에도 적용되지만 이미 확정된 주석은 바뀌지 않습니다. 드래그 중의 점선은 편집 가이드이며 복사·저장 결과에는 포함되지 않습니다.
+
+`Ctrl+T`로 **글자만** 모드를 켜거나 끌 수 있습니다. `Ctrl`을 누른 채 드래그하면 현재 색과 선 굵기로 화살표가 그려지며 이력과 클립보드에 즉시 반영됩니다. 사각형 안의 글자는 사각형 너비에 맞춰 줄바꿈하고, 높이를 넘어가도 이미지 아래쪽까지 이어집니다.
 
 ## 실행
 
@@ -16,18 +20,29 @@ Windows에서 `Ctrl+Shift+C`를 누르고 마우스로 직사각형을 드래그
 dotnet run --project EzCap.csproj
 ```
 
-배포용 파일을 만들려면:
+소스 실행과 빌드에는 .NET 9 SDK가 필요합니다. Windows x64 배포용 단일 EXE를 만들려면:
 
 ```powershell
-dotnet publish EzCap.csproj -c Release -r win-x64 --self-contained false -p:PublishDir=release\v0.1.7\
+dotnet publish EzCap.csproj -p:PublishProfile=Windows
 ```
 
-`release/v0.1.7`의 실행 파일과 `.dll`, `.deps.json`, `.runtimeconfig.json`을 같은 폴더에 두어야 합니다. 실행할 컴퓨터에는 .NET 9 Desktop Runtime이 필요합니다. 이 폴더의 `EzCap.exe`를 실행하세요.
+`release/v0.1.11/EzCap.exe`는 .NET 런타임을 포함하므로 실행할 컴퓨터에 .NET을 별도로 설치할 필요가 없습니다. 네이티브 런타임 파일은 실행 시 임시 폴더에 추출됩니다. WinForms trimming과 NativeAOT는 사용하지 않습니다.
+
+검증 명령:
+
+```powershell
+dotnet build EzCap.csproj -c Release
+dotnet run --project tests/EzCap.UiSmoke -c Release
+dotnet run --project tests/EzCap.RenderingSmoke -c Release
+```
+
+UI 스모크 테스트는 Windows 데스크톱과 클립보드를 사용하며 테스트 폴더에 기존 이력 보안 정책을 적용할 권한이 필요합니다.
+권한 설정을 테스트하지 않고 합성 이미지로 편집기와 클립보드 동작만 검증하려면 UI 테스트 뒤에 `-- --isolated-history`를 붙입니다. 이 모드는 운영 이력 생성자와 ACL 정책을 검증하지 않습니다.
 
 현재 사용자 계정에서 Windows 로그인 시 자동 실행하려면 PowerShell에서 다음을 실행합니다.
 
 ```powershell
-$exe = (Resolve-Path 'release\v0.1.7\EzCap.exe').Path
+$exe = (Resolve-Path 'release\v0.1.11\EzCap.exe').Path
 Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'EzCap' -Value ('"{0}"' -f $exe)
 ```
 

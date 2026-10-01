@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace EzCap;
@@ -16,7 +17,11 @@ internal sealed class EditorForm : Form
     private Color _color = Color.Red;
     private Color? _backgroundColor;
     private int _strokeWidth = 3;
-    private TextBox? _textEditor;
+    private bool _textOnly;
+    private readonly CheckBox _textOnlyCheckBox;
+    private readonly System.Windows.Forms.Timer _clipboardRefreshTimer = new() { Interval = 250 };
+    private Bitmap? _clipboardImage;
+    private AnnotationTextBox? _textEditor;
     private Rectangle? _pendingRectangle;
 
     public EditorForm(Bitmap image, CaptureHistory history, string historyPath)
@@ -72,12 +77,33 @@ internal sealed class EditorForm : Form
             UpdateClipboard();
         };
         var undoButton = new ToolStripButton("실행 취소");
+        _textOnlyCheckBox = new CheckBox
+        {
+            Name = "TextOnlyCheckBox",
+            Text = "글자만",
+            AutoSize = true,
+            BackColor = Color.Transparent
+        };
+        _textOnlyCheckBox.CheckedChanged += (_, _) =>
+        {
+            _textOnly = _textOnlyCheckBox.Checked;
+            if (_textEditor is { } editor)
+            {
+                var background = !_textOnly && _backgroundColor is { } selected
+                    ? selected : _image.GetPixel(editor.Left, editor.Top);
+                editor.BackColor = background.A == 255 ? background : Color.Black;
+            }
+            _canvas?.Invalidate();
+            UpdateClipboard();
+            _textEditor?.Focus();
+        };
+        var textOnlyHost = new ToolStripControlHost(_textOnlyCheckBox);
         undoButton.Click += (_, _) => Undo();
         var copyButton = new ToolStripButton("클립보드 복사");
         copyButton.Click += (_, _) => Copy();
         var saveButton = new ToolStripButton("PNG 저장");
         saveButton.Click += (_, _) => Save();
-        toolbar.Items.AddRange([colorButton, backgroundButton,
+        toolbar.Items.AddRange([textOnlyHost, colorButton, backgroundButton,
             widthLabel, widthBox, new ToolStripSeparator(), undoButton, copyButton, saveButton]);
 
         _viewport = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(38, 38, 38) };
@@ -97,6 +123,7 @@ internal sealed class EditorForm : Form
         _viewport.Resize += (_, _) => CenterCanvas();
         Load += (_, _) => FitImage();
         _history.Changed += RefreshHistory;
+        _clipboardRefreshTimer.Tick += (_, _) => UpdateClipboard();
         RefreshHistory();
         KeyPreview = true;
         KeyDown += (_, e) =>
@@ -104,6 +131,11 @@ internal sealed class EditorForm : Form
             if (e.Control && e.KeyCode == Keys.Z) { Undo(); e.SuppressKeyPress = true; }
             if (e.Control && e.KeyCode == Keys.S) { Save(); e.SuppressKeyPress = true; }
             if (e.Control && e.KeyCode == Keys.C) { Copy(); e.SuppressKeyPress = true; }
+            if (e.Control && e.KeyCode == Keys.T)
+            {
+                _textOnlyCheckBox.Checked = !_textOnlyCheckBox.Checked;
+                e.SuppressKeyPress = true;
+            }
         };
     }
 
@@ -137,9 +169,10 @@ internal sealed class EditorForm : Form
         var inputPoint = new Point(
             Math.Clamp(rectangle.Left + inset, 0, _image.Width - 1),
             Math.Clamp(rectangle.Top + inset, 0, _image.Height - 1));
-        var inputBackground = _backgroundColor ?? _image.GetPixel(inputPoint.X, inputPoint.Y);
+        var inputBackground = !_textOnly && _backgroundColor is { } selected
+            ? selected : _image.GetPixel(inputPoint.X, inputPoint.Y);
         if (inputBackground.A < 255) inputBackground = Color.Black;
-        _textEditor = new TextBox
+        _textEditor = new AnnotationTextBox
         {
             Multiline = true,
             BorderStyle = BorderStyle.None,
@@ -151,8 +184,19 @@ internal sealed class EditorForm : Form
         };
         _textEditor.TextChanged += (_, _) =>
         {
-            _canvas.Invalidate(rectangle);
-            UpdateClipboard();
+            var dirty = new Rectangle(rectangle.Left, rectangle.Top, rectangle.Width,
+                Math.Max(1, _image.Height - rectangle.Top));
+            dirty.Inflate(_strokeWidth + 2, _strokeWidth + 2);
+            _canvas.Invalidate(dirty);
+            _clipboardRefreshTimer.Stop();
+            if (_textEditor is { } activeEditor && !activeEditor.IsComposing())
+                _clipboardRefreshTimer.Start();
+        };
+        _textEditor.CompositionStarted += () => _clipboardRefreshTimer.Stop();
+        _textEditor.CompositionEnded += () =>
+        {
+            _clipboardRefreshTimer.Stop();
+            if (_textEditor is not null) _clipboardRefreshTimer.Start();
         };
         _textEditor.KeyDown += (_, e) =>
         {
@@ -163,6 +207,28 @@ internal sealed class EditorForm : Form
         _textEditor.Focus();
         _canvas.Invalidate(rectangle);
         UpdateClipboard();
+    }
+
+    private void AddArrow(Point start, Point end)
+    {
+        if (start == end) return;
+        CommitText();
+        AddUndo();
+        using (var graphics = Graphics.FromImage(_image)) RenderArrow(graphics, start, end);
+        _canvas.Invalidate();
+        UpdateHistory();
+        UpdateClipboard();
+    }
+
+    private void RenderArrow(Graphics graphics, Point start, Point end)
+    {
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var pen = new Pen(_color, _strokeWidth)
+        {
+            CustomEndCap = new AdjustableArrowCap(Math.Max(4, _strokeWidth * 2),
+                Math.Max(5, _strokeWidth * 3), true)
+        };
+        graphics.DrawLine(pen, start, end);
     }
 
     private void CommitText()
@@ -195,19 +261,24 @@ internal sealed class EditorForm : Form
 
     private void RenderAnnotation(Graphics graphics, Rectangle rectangle, string value, Font font)
     {
-        if (_backgroundColor is { } background)
+        if (!_textOnly)
         {
-            using var fill = new SolidBrush(background);
-            graphics.FillRectangle(fill, rectangle);
+            if (_backgroundColor is { } background)
+            {
+                using var fill = new SolidBrush(background);
+                graphics.FillRectangle(fill, rectangle);
+            }
+            using var pen = new Pen(_color, _strokeWidth);
+            graphics.DrawRectangle(pen, rectangle);
         }
-        using var pen = new Pen(_color, _strokeWidth);
-        graphics.DrawRectangle(pen, rectangle);
         if (string.IsNullOrWhiteSpace(value)) return;
         var inset = _strokeWidth + 4;
-        var textArea = new Rectangle(rectangle.Left + inset, rectangle.Top + inset,
-            Math.Max(1, rectangle.Width - inset * 2), Math.Max(1, rectangle.Height - inset * 2));
+        var textTop = rectangle.Top + inset;
+        var textArea = new Rectangle(rectangle.Left + inset, textTop,
+            Math.Max(1, rectangle.Width - inset * 2),
+            Math.Max(1, (_image?.Height ?? (int)graphics.VisibleClipBounds.Bottom) - textTop));
         using var brush = new SolidBrush(_color);
-        using var format = new StringFormat { Trimming = StringTrimming.EllipsisCharacter };
+        using var format = new StringFormat();
         graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
         graphics.DrawString(value, font, brush, textArea, format);
     }
@@ -219,15 +290,33 @@ internal sealed class EditorForm : Form
 
     private void UpdateClipboard(bool showError = false)
     {
+        _clipboardRefreshTimer.Stop();
         try
         {
-            using var image = (Bitmap)_image.Clone();
+            var image = (Bitmap)_image.Clone();
             if (_pendingRectangle is { } rectangle && _textEditor is { } editor)
             {
                 using var graphics = Graphics.FromImage(image);
                 RenderAnnotation(graphics, rectangle, editor.Text, editor.Font);
             }
-            Clipboard.SetDataObject(image, true, 3, 100);
+            try
+            {
+                for (var attempt = 0; ; attempt++)
+                {
+                    try { Clipboard.SetImage(image); break; }
+                    catch (System.Runtime.InteropServices.ExternalException) when (attempt < 4)
+                    {
+                        System.Threading.Thread.Sleep(50);
+                    }
+                }
+                _clipboardImage?.Dispose();
+                _clipboardImage = image;
+            }
+            catch
+            {
+                image.Dispose();
+                throw;
+            }
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or InvalidOperationException)
         {
@@ -360,12 +449,40 @@ internal sealed class EditorForm : Form
     {
         if (disposing)
         {
+            _clipboardRefreshTimer.Dispose();
             _history.Changed -= RefreshHistory;
             foreach (var picture in _historyStrip.Controls.OfType<PictureBox>().ToArray()) picture.Image?.Dispose();
             _image.Dispose();
+            _clipboardImage?.Dispose();
             foreach (var image in _undo) image.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    private sealed class AnnotationTextBox : TextBox
+    {
+        private const int WmImeStartComposition = 0x010D;
+        private const int WmImeEndComposition = 0x010E;
+
+        private bool _isComposing;
+        internal bool IsComposing() => _isComposing;
+        public event Action? CompositionStarted;
+        public event Action? CompositionEnded;
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == WmImeStartComposition)
+            {
+                _isComposing = true;
+                CompositionStarted?.Invoke();
+            }
+            base.WndProc(ref message);
+            if (message.Msg == WmImeEndComposition)
+            {
+                _isComposing = false;
+                CompositionEnded?.Invoke();
+            }
+        }
     }
 
     private sealed class Canvas : Control
@@ -373,6 +490,7 @@ internal sealed class EditorForm : Form
         private readonly EditorForm owner;
         private Point? _start;
         private Point _end;
+        private bool _arrowDrag;
 
         public Canvas(EditorForm owner)
         {
@@ -389,8 +507,14 @@ internal sealed class EditorForm : Form
                     owner._textEditor?.Font ?? owner.Font);
             if (_start is { } start)
             {
-                using var pen = new Pen(owner._color, owner._strokeWidth);
-                e.Graphics.DrawRectangle(pen, BoundsOf(start, _end));
+                if (_arrowDrag) owner.RenderArrow(e.Graphics, start, _end);
+                else
+                {
+                    using var pen = new Pen(owner._color, owner._strokeWidth);
+                    // The dashed selection guide is editor-only, never part of the output.
+                    if (owner._textOnly) pen.DashStyle = DashStyle.Dash;
+                    e.Graphics.DrawRectangle(pen, BoundsOf(start, _end));
+                }
             }
         }
 
@@ -398,6 +522,7 @@ internal sealed class EditorForm : Form
         {
             if (e.Button != MouseButtons.Left) return;
             owner.CommitText();
+            _arrowDrag = (ModifierKeys & Keys.Control) != 0;
             _start = e.Location;
             _end = e.Location;
             Capture = true;
@@ -409,7 +534,7 @@ internal sealed class EditorForm : Form
             var old = BoundsOf(_start.Value, _end);
             _end = e.Location;
             var dirty = Rectangle.Union(old, BoundsOf(_start.Value, _end));
-            dirty.Inflate(owner._strokeWidth + 2, owner._strokeWidth + 2);
+            dirty.Inflate(owner._strokeWidth * 4 + 2, owner._strokeWidth * 4 + 2);
             Invalidate(dirty);
         }
 
@@ -419,7 +544,9 @@ internal sealed class EditorForm : Form
             Capture = false;
             var rectangle = BoundsOf(start, e.Location);
             _start = null;
-            owner.StartAnnotation(rectangle);
+            if (_arrowDrag) owner.AddArrow(start, e.Location);
+            else owner.StartAnnotation(rectangle);
+            _arrowDrag = false;
             Invalidate();
         }
 
