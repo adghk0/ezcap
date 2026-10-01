@@ -5,7 +5,7 @@ using EzCap;
 internal static class Program
 {
 [STAThread]
-private static void Main()
+private static void Main(string[] args)
 {
 ApplicationConfiguration.Initialize();
 var testRoot = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "tests", ".history-smoke", Guid.NewGuid().ToString("N")));
@@ -15,7 +15,10 @@ if (!testRoot.StartsWith(workspace + Path.DirectorySeparatorChar, StringComparis
 Directory.CreateDirectory(testRoot);
 try
 {
-    var history = new CaptureHistory(testRoot);
+    // Synthetic images only. This optional fixture tests the real editor and
+    // history methods without exercising or changing the production ACL policy.
+    var isolatedHistory = args.Contains("--isolated-history");
+    var history = isolatedHistory ? CreateIsolatedHistory(testRoot) : new CaptureHistory(testRoot);
     var first = new Bitmap(120, 80);
     var firstPath = history.Add(first);
     using var editor = new EditorForm(first, history, firstPath);
@@ -60,7 +63,7 @@ try
     if (editor.Controls.OfType<Panel>().Any(panel => panel.Dock == DockStyle.Top))
         throw new Exception("A top text input panel is still visible.");
     if (editor.Controls.OfType<ToolStrip>().SelectMany(bar => bar.Items.OfType<ToolStripItem>())
-        .Any(item => (item.Text ?? string.Empty).Contains("사각형을 그린 뒤")))
+        .Any(item => (item.Text ?? string.Empty).Contains("???? ?? ?")))
         throw new Exception("The removed toolbar instruction is still visible.");
     textEditor.Text = "note";
     using var textClipboard = Clipboard.GetImage() as Bitmap ?? throw new Exception("Pending text was not copied.");
@@ -87,12 +90,90 @@ try
     using (var filledResult = history.Load(firstPath))
         if (filledResult.GetPixel(70, 50).ToArgb() != Color.Yellow.ToArgb())
             throw new Exception("Selected annotation background was not rendered.");
-    Console.WriteLine("UI smoke passed: history layout, annotation colors, and pending clipboard previews.");
+    using var clean = new Bitmap(240, 140);
+    using (var graphics = Graphics.FromImage(clean)) graphics.Clear(Color.White);
+    var textPath = history.Add(clean);
+    using var textOnlyEditor = new EditorForm((Bitmap)clean.Clone(), history, textPath);
+    textOnlyEditor.Show();
+    Application.DoEvents();
+    var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+    var checkbox = textOnlyEditor.Controls.OfType<ToolStrip>()
+        .SelectMany(bar => bar.Items.OfType<ToolStripControlHost>())
+        .Select(host => host.Control).OfType<CheckBox>().Single(control => control.Name == "TextOnlyCheckBox");
+    if (checkbox.Checked) throw new Exception("Text-only must be off by default.");
+    typeof(EditorForm).GetField("_backgroundColor", flags)!.SetValue(textOnlyEditor, Color.Yellow);
+    var start = typeof(EditorForm).GetMethod("StartAnnotation", flags)!;
+    start.Invoke(textOnlyEditor, [new Rectangle(10, 10, 200, 100)]);
+    FindTextBox(textOnlyEditor)!.Text = "Text only";
+    checkbox.Checked = true;
+    Application.DoEvents();
+    using var textOnlyClipboard = Clipboard.GetImage() as Bitmap ?? throw new Exception("Missing text-only clipboard.");
+    AssertTextOnly(textOnlyClipboard);
+    var textCanvas = ((Panel)typeof(EditorForm).GetField("_viewport", flags)!.GetValue(textOnlyEditor)!).Controls[0];
+    using (var preview = new Bitmap(clean.Width, clean.Height))
+    {
+        textCanvas.DrawToBitmap(preview, new Rectangle(Point.Empty, preview.Size));
+        AssertTextOnly(preview);
+    }
+    checkbox.Checked = false;
+    using (var restored = Clipboard.GetImage() as Bitmap ?? throw new Exception("Missing restored clipboard."))
+        if (restored.GetPixel(10, 10).ToArgb() != Color.Red.ToArgb() || restored.GetPixel(180, 90).ToArgb() != Color.Yellow.ToArgb())
+            throw new Exception("Disabling text-only did not restore border and fill.");
+    checkbox.Checked = true;
+    typeof(EditorForm).GetMethod("Copy", flags)!.Invoke(textOnlyEditor, null);
+    if (FindTextBox(textOnlyEditor) is null) throw new Exception("Copy committed pending text.");
+    typeof(EditorForm).GetMethod("CommitText", flags)!.Invoke(textOnlyEditor, null);
+    using (var committed = history.Load(textPath)) AssertTextOnly(committed);
+    checkbox.Checked = false;
+    using (var unchanged = Clipboard.GetImage() as Bitmap ?? throw new Exception("Missing committed clipboard."))
+        AssertTextOnly(unchanged);
+    // Save uses this same committed bitmap; verify the PNG encoding and reload.
+    var pngPath = Path.Combine(testRoot, "text-only.png");
+    ((Bitmap)typeof(EditorForm).GetField("_image", flags)!.GetValue(textOnlyEditor)!)
+        .Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
+    using (var png = new Bitmap(pngPath)) AssertTextOnly(png);
+    typeof(EditorForm).GetMethod("Undo", flags)!.Invoke(textOnlyEditor, null);
+    using (var undone = history.Load(textPath))
+        if (HasText(undone)) throw new Exception("Undo did not remove committed text.");
+    checkbox.Checked = true;
+    start.Invoke(textOnlyEditor, [new Rectangle(10, 10, 200, 100)]);
+    using (var empty = Clipboard.GetImage() as Bitmap ?? throw new Exception("Missing empty clipboard."))
+        if (HasText(empty) || empty.GetPixel(10, 10).ToArgb() != Color.White.ToArgb())
+            throw new Exception("Empty text-only annotation changed the image.");
+    FindTextBox(textOnlyEditor)!.Text = "cancel";
+    typeof(EditorForm).GetMethod("CancelText", flags)!.Invoke(textOnlyEditor, null);
+    using (var cancelled = Clipboard.GetImage() as Bitmap ?? throw new Exception("Missing cancelled clipboard."))
+        if (HasText(cancelled)) throw new Exception("Cancel did not restore the clipboard.");
+    textOnlyEditor.Close();
+    Console.WriteLine("UI smoke passed: history, default rendering, text-only toggle, preview, automatic/manual clipboard, commit, PNG, undo, empty text, cancel.");
+    if (isolatedHistory) Console.WriteLine("Isolated history fixture: production constructor and ACL policy were not tested.");
 }
 finally
 {
     Directory.Delete(testRoot, true);
 }
+}
+
+static CaptureHistory CreateIsolatedHistory(string directory)
+{
+    var history = (CaptureHistory)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(CaptureHistory));
+    var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+    typeof(CaptureHistory).GetField("_directory", flags)!.SetValue(history, directory);
+    typeof(CaptureHistory).GetField("_files", flags)!.SetValue(history, new List<string>());
+    return history;
+}
+
+static bool HasText(Bitmap image) =>
+    Enumerable.Range(18, 40).SelectMany(y => Enumerable.Range(18, 140).Select(x => (x, y)))
+        .Any(point => image.GetPixel(point.x, point.y).ToArgb() != Color.White.ToArgb());
+
+static void AssertTextOnly(Bitmap image)
+{
+    if (image.GetPixel(10, 10).ToArgb() != Color.White.ToArgb())
+        throw new Exception("Text-only output contains a border.");
+    if (image.GetPixel(180, 90).ToArgb() != Color.White.ToArgb())
+        throw new Exception("Text-only output contains a background fill.");
+    if (!HasText(image)) throw new Exception("Text-only output is missing text.");
 }
 
 static Panel? FindHistoryStrip(Control root)
